@@ -10,7 +10,7 @@ import {
   DAYS_OF_WEEK, DAY_LABELS, CATEGORY_LABELS, CATEGORY_COLORS, formatDuration,
   getMondayOfWeek, formatWeekRange,
 } from '@/lib/types';
-import { AthleteAvatar } from '../../dashboard/page';
+import { AthleteAvatar } from '@/components/admin/AthleteAvatar';
 import {
   ArrowLeft, ChevronLeft, ChevronRight, Plus, Trash2, X, Search,
   Timer, RotateCcw, Play, Save,
