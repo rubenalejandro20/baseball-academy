@@ -29,12 +29,7 @@ export default function AthleteAccessPage() {
         {/* Logo */}
         <div className="text-center mb-10">
           <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-white shadow-xl border border-gray-100 mb-5">
-            <svg viewBox="0 0 32 32" className="w-10 h-10" fill="none">
-              <circle cx="16" cy="16" r="13" stroke="#15803d" strokeWidth="2"/>
-              <path d="M9 8c2 2 3 5 3 8s-1 6-3 8" stroke="#15803d" strokeWidth="1.5" strokeLinecap="round"/>
-              <path d="M23 8c-2 2-3 5-3 8s1 6 3 8" stroke="#15803d" strokeWidth="1.5" strokeLinecap="round"/>
-              <path d="M3 16h26" stroke="#15803d" strokeWidth="1.5" strokeLinecap="round"/>
-            </svg>
+            <img src="/7ARlogo.png" alt="7AR Baseball Academy" className="w-12 h-12 object-contain" />
           </div>
           <h1
             className="text-3xl font-black tracking-tight text-gray-900"
