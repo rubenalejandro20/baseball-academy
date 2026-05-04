@@ -24,6 +24,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [authorized, setAuthorized] = useState(false);
 
   useEffect(() => {
+    if (pathname === '/admin/login') {
+      setAuthorized(true);
+      return;
+    }
     const supabase = createClient();
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) {
@@ -33,7 +37,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         setAuthorized(true);
       }
     });
-  }, [router]);
+  }, [router, pathname]);
 
   async function handleLogout() {
     const supabase = createClient();
