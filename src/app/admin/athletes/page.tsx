@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase';
 import { type Athlete } from '@/lib/types';
 import { Plus, Search, ChevronRight, Pencil, CalendarDays } from 'lucide-react';
-import { AthleteAvatar } from '../dashboard/page';
+import { AthleteAvatar } from '@/components/admin/AthleteAvatar';
 
 export default function AthletesPage() {
   const [athletes, setAthletes] = useState<Athlete[]>([]);
