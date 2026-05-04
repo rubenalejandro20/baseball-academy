@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase';
 import { type Athlete } from '@/lib/types';
-import { AthleteAvatar } from '../dashboard/page';
+import { AthleteAvatar } from '@/components/admin/AthleteAvatar';
 import { CalendarDays, Search, ChevronRight } from 'lucide-react';
 
 export default function AssignmentsIndexPage() {
