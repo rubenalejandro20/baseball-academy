@@ -255,7 +255,7 @@ function QuickAction({ href, icon, label, desc }: {
   );
 }
 
-function AthleteAvatar({
+export function AthleteAvatar({
   athlete, size = 'md',
 }: {
   athlete: Pick<Athlete, 'full_name' | 'photo_url'>;
