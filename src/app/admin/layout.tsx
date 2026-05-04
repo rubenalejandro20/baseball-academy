@@ -104,11 +104,7 @@ function SidebarContent({
       <div className="flex items-center justify-between px-5 h-16 border-b border-[var(--border)] shrink-0">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-brand-500/15 border border-brand-500/30 flex items-center justify-center">
-            <svg viewBox="0 0 32 32" className="w-4 h-4" fill="none">
-              <circle cx="16" cy="16" r="13" stroke="#22c55e" strokeWidth="2.5"/>
-              <path d="M9 8c2 2 3 5 3 8s-1 6-3 8" stroke="#22c55e" strokeWidth="2" strokeLinecap="round"/>
-              <path d="M23 8c-2 2-3 5-3 8s1 6 3 8" stroke="#22c55e" strokeWidth="2" strokeLinecap="round"/>
-            </svg>
+            <img src="/7ARlogo.png" alt="7AR Baseball Academy" className="w-6 h-6 object-contain" />
           </div>
           <div>
             <p className="font-display font-bold text-sm tracking-widest text-white leading-none">7AR ACADEMY</p>
