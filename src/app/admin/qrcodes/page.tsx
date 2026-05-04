@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase';
 import { type Athlete } from '@/lib/types';
-import { AthleteAvatar } from '../dashboard/page';
+import { AthleteAvatar } from '@/components/admin/AthleteAvatar';
 import { QrCode } from 'lucide-react';
 
 export default function QRCodesPage() {
