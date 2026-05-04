@@ -40,7 +40,7 @@ export default function AthleteAccessPage() {
             className="text-3xl font-black tracking-tight text-gray-900"
             style={{ fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.05em' }}
           >
-            BASEBALL ACADEMY
+            7AR BASEBALL ACADEMY
           </h1>
           <p className="text-gray-500 text-sm mt-1" style={{ fontFamily: "'DM Sans', sans-serif" }}>
             Your Performance Program
