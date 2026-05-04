@@ -1,0 +1,115 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Dark admin theme */
+  --bg-primary:    #0B1426;
+  --bg-secondary:  #111d33;
+  --bg-card:       #152236;
+  --bg-card-hover: #1a2a42;
+  --border:        rgba(255,255,255,0.08);
+  --border-strong: rgba(255,255,255,0.15);
+  --text-primary:  #f1f5f9;
+  --text-muted:    #8899b4;
+  --accent:        #22c55e;
+  --accent-dim:    rgba(34,197,94,0.15);
+  --accent-glow:   rgba(34,197,94,0.3);
+
+  --font-display: 'Barlow Condensed', sans-serif;
+  --font-body:    'DM Sans', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar        { width: 6px; height: 6px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: rgba(255,255,255,0.12); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
+
+/* ── Typography helpers ── */
+.font-display { font-family: var(--font-display); }
+.font-body    { font-family: var(--font-body); }
+
+/* ── Card base ── */
+.card {
+  @apply rounded-xl border bg-[var(--bg-card)] border-[var(--border)] transition-all duration-200;
+}
+.card-hover {
+  @apply hover:border-[var(--border-strong)] hover:bg-[var(--bg-card-hover)];
+}
+
+/* ── Inputs (dark theme) ── */
+.input-dark {
+  @apply w-full bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg
+         px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)]
+         focus:outline-none focus:border-brand-500/60 focus:ring-1 focus:ring-brand-500/30
+         transition-colors;
+}
+
+.input-dark:disabled {
+  @apply opacity-50 cursor-not-allowed;
+}
+
+/* ── Buttons ── */
+.btn-primary {
+  @apply inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold
+         bg-brand-500 hover:bg-brand-400 text-white transition-colors duration-150
+         disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.btn-secondary {
+  @apply inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold
+         bg-white/10 hover:bg-white/15 text-[var(--text-primary)] transition-colors
+         border border-[var(--border)] disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.btn-danger {
+  @apply inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold
+         bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30
+         transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+/* ── Badge ── */
+.badge {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border;
+}
+
+/* ── Page transitions ── */
+.page-enter {
+  @apply animate-fade-in;
+}
+
+/* ── Athlete light theme (public page) ── */
+.athlete-page {
+  --bg-athlete: #f8fafc;
+  --text-athlete: #0f172a;
+  background-color: var(--bg-athlete);
+  color: var(--text-athlete);
+}
+
+/* ── Noise grain overlay ── */
+.grain::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 9999;
+}
