@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase';
 import { type Athlete, type WeeklyPlan, CATEGORY_LABELS, CATEGORY_COLORS, formatWeekRange, DAY_LABELS } from '@/lib/types';
-import { AthleteAvatar } from '../../dashboard/page';
+import { AthleteAvatar } from '@/components/admin/AthleteAvatar';
 import { ArrowLeft, Pencil, CalendarDays, Trash2, QrCode, Copy, Check } from 'lucide-react';
 
 export default function AthleteProfilePage() {
