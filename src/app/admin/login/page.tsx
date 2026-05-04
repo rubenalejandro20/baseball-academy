@@ -48,12 +48,7 @@ export default function AdminLoginPage() {
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-brand-500/15 border border-brand-500/30 mb-4">
             {/* Baseball icon */}
-            <svg viewBox="0 0 32 32" className="w-8 h-8" fill="none">
-              <circle cx="16" cy="16" r="13" stroke="#22c55e" strokeWidth="2"/>
-              <path d="M9 8c2 2 3 5 3 8s-1 6-3 8" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round"/>
-              <path d="M23 8c-2 2-3 5-3 8s1 6 3 8" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round"/>
-              <path d="M3 16h26" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round"/>
-            </svg>
+            <img src="/7ARlogo.png" alt="7AR Baseball Academy" className="w-10 h-10 object-contain" />
           </div>
           <h1 className="font-display text-3xl font-bold tracking-wide text-white">
             BASEBALL ACADEMY

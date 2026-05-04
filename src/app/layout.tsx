@@ -4,7 +4,7 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'Baseball Academy – Athlete Management',
   description: 'Physician dashboard and athlete exercise management platform for baseball academies.',
-  icons: { icon: '/favicon.ico' },
+  icons: { icon: '/7ARlogo.png' },
 };
 
 export default function RootLayout({
