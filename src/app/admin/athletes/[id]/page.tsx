@@ -1,21 +1,20 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase';
 import { type Athlete, type WeeklyPlan, CATEGORY_LABELS, CATEGORY_COLORS, formatWeekRange, DAY_LABELS } from '@/lib/types';
 import { AthleteAvatar } from '@/components/admin/AthleteAvatar';
-import { ArrowLeft, Pencil, CalendarDays, Trash2, QrCode, Copy, Check } from 'lucide-react';
+import { ArrowLeft, Pencil, CalendarDays, Trash2, UserCheck, QrCode, Copy, Check } from 'lucide-react';
 
 export default function AthleteProfilePage() {
   const { id } = useParams<{ id: string }>();
-  const router  = useRouter();
   const [athlete, setAthlete]   = useState<Athlete | null>(null);
   const [plans, setPlans]       = useState<WeeklyPlan[]>([]);
   const [loading, setLoading]   = useState(true);
   const [copied, setCopied]     = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [toggling, setToggling] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -31,12 +30,18 @@ export default function AthleteProfilePage() {
     load();
   }, [id]);
 
-  async function handleDelete() {
-    if (!confirm('Delete this athlete? This will also remove all their weekly plans.')) return;
-    setDeleting(true);
+  async function handleToggleActive() {
+    if (!athlete) return;
+    const next = !athlete.is_active;
+    const msg = next
+      ? 'Reactivate this athlete?'
+      : 'Deactivate this athlete? They will be hidden from the active roster but their data is preserved.';
+    if (!confirm(msg)) return;
+    setToggling(true);
     const supabase = createClient();
-    await supabase.from('athletes').update({ is_active: false }).eq('id', id);
-    router.push('/admin/athletes');
+    await supabase.from('athletes').update({ is_active: next }).eq('id', id);
+    setAthlete({ ...athlete, is_active: next });
+    setToggling(false);
   }
 
   function copyCode() {
@@ -92,7 +97,16 @@ export default function AthleteProfilePage() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-4">
               <InfoItem label="Age"    value={athlete.age ? `${athlete.age} yrs`   : '—'} />
               <InfoItem label="Weight" value={athlete.weight_lbs ? `${athlete.weight_lbs} lbs` : '—'} />
-              <InfoItem label="Status" value={athlete.is_active ? 'Active' : 'Inactive'} />
+              <div>
+                <p className="text-xs text-slate-500 uppercase tracking-wider">Status</p>
+                <span className={`inline-block text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded mt-0.5 ${
+                  athlete.is_active
+                    ? 'bg-brand-500/15 text-brand-400'
+                    : 'bg-slate-700 text-slate-400'
+                }`}>
+                  {athlete.is_active ? 'Active' : 'Inactive'}
+                </span>
+              </div>
               <InfoItem label="Since"  value={new Date(athlete.created_at).toLocaleDateString()} />
             </div>
           </div>
@@ -175,17 +189,24 @@ export default function AthleteProfilePage() {
         )}
       </div>
 
-      {/* Danger zone */}
-      <div className="card p-6 border-red-500/15">
-        <h3 className="font-display text-base font-semibold tracking-wide text-red-400 mb-3">
-          DANGER ZONE
+      {/* Status toggle */}
+      <div className={`card p-6 ${athlete.is_active ? 'border-red-500/15' : 'border-brand-500/15'}`}>
+        <h3 className={`font-display text-base font-semibold tracking-wide mb-3 ${athlete.is_active ? 'text-red-400' : 'text-brand-400'}`}>
+          {athlete.is_active ? 'DANGER ZONE' : 'REACTIVATE ATHLETE'}
         </h3>
         <p className="text-sm text-slate-500 mb-4">
-          Deactivating this athlete will hide them from the roster. Their data is preserved.
+          {athlete.is_active
+            ? 'Deactivating this athlete hides them from the active roster. Their data and plans are preserved.'
+            : 'This athlete is currently inactive. Reactivating will return them to the active roster.'}
         </p>
-        <button onClick={handleDelete} disabled={deleting} className="btn-danger text-sm">
-          <Trash2 className="w-4 h-4" />
-          {deleting ? 'Deactivating…' : 'Deactivate Athlete'}
+        <button
+          onClick={handleToggleActive}
+          disabled={toggling}
+          className={athlete.is_active ? 'btn-danger text-sm' : 'btn-primary text-sm'}
+        >
+          {athlete.is_active
+            ? <><Trash2 className="w-4 h-4" />{toggling ? 'Deactivating…' : 'Deactivate Athlete'}</>
+            : <><UserCheck className="w-4 h-4" />{toggling ? 'Reactivating…' : 'Reactivate Athlete'}</>}
         </button>
       </div>
     </div>
