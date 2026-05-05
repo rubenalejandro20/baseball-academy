@@ -5,15 +5,15 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase';
 import {
-  LayoutDashboard, Users, Dumbbell, CalendarDays, LogOut, Menu, X, Activity, QrCode
+  LayoutDashboard, Users, Dumbbell, Layers, LogOut, Menu, X, Activity, QrCode
 } from 'lucide-react';
 
 const NAV = [
-  { href: '/admin/dashboard',  label: 'Dashboard',        icon: LayoutDashboard },
-  { href: '/admin/athletes',   label: 'Athletes',          icon: Users },
-  { href: '/admin/exercises',  label: 'Exercise Library',  icon: Dumbbell },
-  { href: '/admin/assignments',label: 'Weekly Plans',      icon: CalendarDays },
-  { href: '/admin/qrcodes',    label: 'QR Codes',          icon: QrCode },
+  { href: '/admin/dashboard', label: 'Dashboard',       icon: LayoutDashboard },
+  { href: '/admin/athletes',  label: 'Athletes',         icon: Users },
+  { href: '/admin/exercises', label: 'Exercise Library', icon: Dumbbell },
+  { href: '/admin/routines',  label: 'Routines',         icon: Layers },
+  { href: '/admin/qrcodes',   label: 'QR Codes',         icon: QrCode },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

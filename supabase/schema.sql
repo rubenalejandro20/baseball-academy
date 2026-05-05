@@ -157,7 +157,34 @@ CREATE POLICY "Athlete can upload photo"
 -- INSERT INTO storage.buckets (id, name, public) VALUES ('athlete-photos', 'athlete-photos', TRUE);
 
 -- ─────────────────────────────────────────────
--- 8. SAMPLE DATA (optional – remove in production)
+-- 8. ACTIVITY ROUTINES
+-- ─────────────────────────────────────────────
+CREATE TYPE activity_type AS ENUM ('pitching', 'catching', 'hitting', 'fielding');
+
+CREATE TABLE IF NOT EXISTS activity_routines (
+  id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  activity              activity_type NOT NULL,
+  session_type          exercise_category NOT NULL,
+  exercise_id           UUID NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+  sets_override         INTEGER,
+  reps_override         INTEGER,
+  duration_sec_override INTEGER,
+  notes                 TEXT,
+  sort_order            INTEGER NOT NULL DEFAULT 0,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (activity, session_type, exercise_id)
+);
+
+ALTER TABLE activity_routines ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Admin full access – activity_routines"
+  ON activity_routines FOR ALL TO authenticated USING (TRUE) WITH CHECK (TRUE);
+
+CREATE POLICY "Public read activity_routines"
+  ON activity_routines FOR SELECT TO anon USING (TRUE);
+
+-- ─────────────────────────────────────────────
+-- 9. SAMPLE DATA (optional – remove in production)
 -- ─────────────────────────────────────────────
 INSERT INTO exercises (name, category, description, sets, reps, duration_sec) VALUES
   ('Hip Flexor Stretch',        'mobility',           'Kneel on one knee, push hips forward gently. Hold for 30 s each side.',                     3, NULL, 30),

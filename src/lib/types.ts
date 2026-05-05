@@ -159,3 +159,36 @@ export function formatDuration(seconds: number): string {
   const s = seconds % 60;
   return s ? `${m}m ${s}s` : `${m}m`;
 }
+
+// ─────────────────────────────────────────────
+// Activity Routine Types
+// ─────────────────────────────────────────────
+
+export type ActivityType = 'pitching' | 'catching' | 'hitting' | 'fielding';
+
+export interface ActivityRoutine {
+  id: string;
+  activity: ActivityType;
+  session_type: ExerciseCategory;
+  exercise_id: string;
+  sets_override: number | null;
+  reps_override: number | null;
+  duration_sec_override: number | null;
+  notes: string | null;
+  sort_order: number;
+  created_at: string;
+  exercise?: Exercise;
+}
+
+export const ACTIVITIES: ActivityType[] = ['pitching', 'catching', 'hitting', 'fielding'];
+
+export const ACTIVITY_LABELS: Record<ActivityType, string> = {
+  pitching: 'Pitching',
+  catching: 'Catching',
+  hitting:  'Hitting',
+  fielding: 'Fielding',
+};
+
+export const SESSION_TYPES: ExerciseCategory[] = [
+  'pre_training', 'post_training', 'recovery', 'mobility', 'strength', 'injury_prevention',
+];

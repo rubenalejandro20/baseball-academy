@@ -5,80 +5,60 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase';
 import {
-  type Athlete, type WeeklyPlan, type AssignedExercise, type DayOfWeek,
-  DAYS_OF_WEEK, DAY_LABELS, CATEGORY_LABELS, CATEGORY_COLORS_LIGHT,
-  formatDuration, getMondayOfWeek, formatWeekRange,
+  type Athlete, type ActivityType, type ExerciseCategory, type ActivityRoutine,
+  ACTIVITIES, ACTIVITY_LABELS, CATEGORY_LABELS, CATEGORY_COLORS_LIGHT, SESSION_TYPES,
+  formatDuration,
 } from '@/lib/types';
-import { ChevronLeft, ChevronRight, Play, Timer, RotateCcw, Upload, Camera, ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Play, Timer, RotateCcw, ChevronRight, Camera } from 'lucide-react';
 
-export default function AthleteExerciseViewPage() {
-  const { code } = useParams<{ code: string }>();
+type Step = 'activities' | 'session' | 'primary' | 'routine';
 
-  const [athlete, setAthlete]   = useState<Athlete | null>(null);
-  const [plan, setPlan]         = useState<WeeklyPlan | null>(null);
-  const [assigned, setAssigned] = useState<AssignedExercise[]>([]);
-  const [weekStart, setWeekStart] = useState(getMondayOfWeek());
-  const [activeDay, setActiveDay] = useState<DayOfWeek>(() => {
-    const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
-    return (days[new Date().getDay()] ?? 'monday') as DayOfWeek;
-  });
-  const [notFound, setNotFound] = useState(false);
-  const [loading, setLoading]   = useState(true);
-  const [uploading, setUploading] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+const ACTIVITY_STYLES: Record<ActivityType, { idle: string; active: string; emoji: string }> = {
+  pitching: { idle: 'bg-blue-50 border-blue-200 text-blue-800',   active: 'bg-blue-600 border-blue-600 text-white',   emoji: '⚾' },
+  catching: { idle: 'bg-amber-50 border-amber-200 text-amber-800', active: 'bg-amber-500 border-amber-500 text-white', emoji: '🧤' },
+  hitting:  { idle: 'bg-red-50 border-red-200 text-red-800',       active: 'bg-red-600 border-red-600 text-white',     emoji: '🏏' },
+  fielding: { idle: 'bg-green-50 border-green-200 text-green-800', active: 'bg-green-600 border-green-600 text-white', emoji: '🌿' },
+};
 
-  // Load athlete by access code
+const SESSION_STYLES: Record<ExerciseCategory, { idle: string; active: string }> = {
+  pre_training:      { idle: 'bg-blue-50 border-blue-200 text-blue-800',     active: 'bg-blue-600 border-blue-600 text-white' },
+  post_training:     { idle: 'bg-purple-50 border-purple-200 text-purple-800', active: 'bg-purple-600 border-purple-600 text-white' },
+  recovery:          { idle: 'bg-teal-50 border-teal-200 text-teal-800',      active: 'bg-teal-600 border-teal-600 text-white' },
+  mobility:          { idle: 'bg-amber-50 border-amber-200 text-amber-800',   active: 'bg-amber-500 border-amber-500 text-white' },
+  strength:          { idle: 'bg-red-50 border-red-200 text-red-800',         active: 'bg-red-600 border-red-600 text-white' },
+  injury_prevention: { idle: 'bg-emerald-50 border-emerald-200 text-emerald-800', active: 'bg-emerald-600 border-emerald-600 text-white' },
+};
+
+export default function AthleteRoutinePage() {
+  const { code }  = useParams<{ code: string }>();
+  const fileRef   = useRef<HTMLInputElement>(null);
+
+  const [athlete, setAthlete]       = useState<Athlete | null>(null);
+  const [notFound, setNotFound]     = useState(false);
+  const [loadingAthlete, setLoadingAthlete] = useState(true);
+  const [uploading, setUploading]   = useState(false);
+
+  const [step, setStep]                     = useState<Step>('activities');
+  const [selectedActivities, setSelectedActivities] = useState<ActivityType[]>([]);
+  const [selectedSession, setSelectedSession]       = useState<ExerciseCategory | null>(null);
+  const [routines, setRoutines]             = useState<ActivityRoutine[]>([]);
+  const [routineLoading, setRoutineLoading] = useState(false);
+
   useEffect(() => {
     async function load() {
       const supabase = createClient();
-      const { data: a } = await supabase
+      const { data } = await supabase
         .from('athletes')
         .select('*')
         .eq('access_code', code.toUpperCase())
         .eq('is_active', true)
         .maybeSingle();
-
-      if (!a) { setNotFound(true); setLoading(false); return; }
-      setAthlete(a);
+      if (!data) setNotFound(true);
+      else setAthlete(data);
+      setLoadingAthlete(false);
     }
     load();
   }, [code]);
-
-  // Load plan for week
-  useEffect(() => {
-    if (!athlete) return;
-    async function loadPlan() {
-      setLoading(true);
-      const supabase = createClient();
-      const { data: p } = await supabase
-        .from('weekly_plans')
-        .select('*')
-        .eq('athlete_id', athlete!.id)
-        .eq('week_start', weekStart)
-        .maybeSingle();
-
-      if (p) {
-        const { data: ae } = await supabase
-          .from('assigned_exercises')
-          .select('*, exercise:exercises(*)')
-          .eq('weekly_plan_id', p.id)
-          .order('sort_order');
-        setPlan(p);
-        setAssigned(ae ?? []);
-      } else {
-        setPlan(null);
-        setAssigned([]);
-      }
-      setLoading(false);
-    }
-    loadPlan();
-  }, [athlete, weekStart]);
-
-  function shiftWeek(delta: number) {
-    const d = new Date(weekStart + 'T00:00:00');
-    d.setDate(d.getDate() + delta * 7);
-    setWeekStart(d.toISOString().split('T')[0]);
-  }
 
   async function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -88,8 +68,8 @@ export default function AthleteExerciseViewPage() {
       const supabase = createClient();
       const ext  = file.name.split('.').pop();
       const path = `athletes/${athlete.id}.${ext}`;
-      const { error: upErr } = await supabase.storage.from('athlete-photos').upload(path, file, { upsert: true });
-      if (!upErr) {
+      const { error } = await supabase.storage.from('athlete-photos').upload(path, file, { upsert: true });
+      if (!error) {
         const { data: { publicUrl } } = supabase.storage.from('athlete-photos').getPublicUrl(path);
         await supabase.from('athletes').update({ photo_url: publicUrl }).eq('id', athlete.id);
         setAthlete(a => a ? { ...a, photo_url: publicUrl } : a);
@@ -99,10 +79,56 @@ export default function AthleteExerciseViewPage() {
     }
   }
 
-  const todayExercises  = assigned.filter(a => a.day === activeDay);
-  const daysWithContent = new Set(assigned.map(a => a.day));
+  function toggleActivity(activity: ActivityType) {
+    setSelectedActivities(prev =>
+      prev.includes(activity) ? prev.filter(a => a !== activity) : [...prev, activity]
+    );
+  }
 
-  // ── Not found ──
+  async function loadRoutines(activities: ActivityType[], session: ExerciseCategory) {
+    setRoutineLoading(true);
+    const supabase = createClient();
+    const { data } = await supabase
+      .from('activity_routines')
+      .select('*, exercise:exercises(*)')
+      .in('activity', activities)
+      .eq('session_type', session)
+      .order('activity')
+      .order('sort_order');
+    setRoutines(data ?? []);
+    setRoutineLoading(false);
+  }
+
+  function handleSessionSelect(session: ExerciseCategory) {
+    setSelectedSession(session);
+    const multiAndFocused = selectedActivities.length > 1 &&
+      (session === 'pre_training' || session === 'post_training');
+    if (multiAndFocused) {
+      setStep('primary');
+    } else {
+      loadRoutines(selectedActivities, session);
+      setStep('routine');
+    }
+  }
+
+  function handlePrimarySelect(activity: ActivityType) {
+    loadRoutines([activity], selectedSession!);
+    setStep('routine');
+  }
+
+  function goBack() {
+    if (step === 'routine') {
+      const wasPrimary = selectedActivities.length > 1 &&
+        (selectedSession === 'pre_training' || selectedSession === 'post_training');
+      setStep(wasPrimary ? 'primary' : 'session');
+    } else if (step === 'primary') {
+      setStep('session');
+    } else if (step === 'session') {
+      setStep('activities');
+    }
+  }
+
+  // ── Not found ─────────────────────────────────────────────────
   if (notFound) {
     return (
       <div className="athlete-page min-h-screen flex flex-col items-center justify-center px-4 text-center">
@@ -118,7 +144,7 @@ export default function AthleteExerciseViewPage() {
     );
   }
 
-  if (loading && !athlete) {
+  if (loadingAthlete) {
     return (
       <div className="athlete-page min-h-screen flex items-center justify-center">
         <div className="w-8 h-8 border-3 border-green-600 border-t-transparent rounded-full animate-spin" />
@@ -126,17 +152,29 @@ export default function AthleteExerciseViewPage() {
     );
   }
 
+  const showBack = step !== 'activities';
+
   return (
-    <div className="athlete-page min-h-screen" style={{ fontFamily: "'DM Sans', sans-serif" }}>
-      {/* Top nav */}
+    <div className="athlete-page min-h-screen flex flex-col" style={{ fontFamily: "'DM Sans', sans-serif" }}>
+      {/* Header */}
       <header className="sticky top-0 z-10 bg-white border-b border-gray-100 px-4 py-3 flex items-center gap-3 shadow-sm">
-        <Link href="/athlete" className="p-2 rounded-xl border border-gray-200 text-gray-500 hover:bg-gray-50">
-          <ArrowLeft className="w-4 h-4" />
-        </Link>
+        {showBack ? (
+          <button
+            onClick={goBack}
+            className="p-2 rounded-xl border border-gray-200 text-gray-500 hover:bg-gray-50 shrink-0"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+        ) : (
+          <Link href="/athlete" className="p-2 rounded-xl border border-gray-200 text-gray-500 hover:bg-gray-50 shrink-0">
+            <ArrowLeft className="w-4 h-4" />
+          </Link>
+        )}
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <AthletePhoto athlete={athlete!} onUpload={() => fileRef.current?.click()} uploading={uploading} />
           <div className="min-w-0">
-            <p className="font-black text-gray-900 text-sm leading-tight truncate" style={{ fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.05em' }}>
+            <p className="font-black text-gray-900 text-sm leading-tight truncate"
+               style={{ fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.05em' }}>
               {athlete?.full_name.toUpperCase()}
             </p>
             <p className="text-xs text-gray-400">{athlete?.position ?? 'Athlete'}</p>
@@ -145,90 +183,242 @@ export default function AthleteExerciseViewPage() {
         <input ref={fileRef} type="file" accept="image/*" capture="user" className="hidden" onChange={handlePhotoUpload} />
       </header>
 
-      {/* Week selector */}
-      <div className="bg-gray-50 border-b border-gray-100 px-4 py-3 flex items-center justify-between">
-        <button onClick={() => shiftWeek(-1)} className="p-2 rounded-xl border border-gray-200 text-gray-500 hover:bg-white">
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-        <div className="text-center">
-          <p className="text-sm font-bold text-gray-800">{formatWeekRange(weekStart)}</p>
-          {weekStart === getMondayOfWeek() && (
-            <p className="text-xs text-green-600 font-semibold">This Week</p>
-          )}
-        </div>
-        <button onClick={() => shiftWeek(1)} className="p-2 rounded-xl border border-gray-200 text-gray-500 hover:bg-white">
-          <ChevronRight className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Day pills */}
-      <div className="bg-white border-b border-gray-100 px-3 py-3 flex gap-1.5 overflow-x-auto no-scrollbar">
-        {DAYS_OF_WEEK.map(day => {
-          const hasContent = daysWithContent.has(day);
-          const isActive   = activeDay === day;
-          return (
-            <button
-              key={day}
-              onClick={() => setActiveDay(day)}
-              className={`shrink-0 px-3 py-2 rounded-xl text-xs font-bold transition-all relative ${
-                isActive
-                  ? 'bg-green-600 text-white shadow-md shadow-green-200'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-              style={{ fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.05em' }}
-            >
-              {DAY_LABELS[day].slice(0, 3).toUpperCase()}
-              {hasContent && !isActive && (
-                <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-green-500" />
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Exercise content */}
-      <main className="px-4 py-5 max-w-lg mx-auto space-y-4 pb-20">
-        {loading ? (
-          <div className="space-y-3">
-            {[1,2,3].map(i => <div key={i} className="h-28 bg-gray-100 rounded-2xl animate-pulse" />)}
-          </div>
-        ) : todayExercises.length === 0 ? (
-          <div className="text-center py-16">
-            <div className="text-5xl mb-3">🏖️</div>
-            <p className="font-bold text-gray-700 text-lg" style={{ fontFamily: "'Barlow Condensed', sans-serif" }}>REST DAY</p>
-            <p className="text-gray-400 text-sm mt-1">No exercises scheduled for {DAY_LABELS[activeDay]}.</p>
-          </div>
-        ) : (
-          <>
-            <div className="flex items-center justify-between">
-              <h2 className="font-black text-gray-900 text-xl" style={{ fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.05em' }}>
-                {DAY_LABELS[activeDay].toUpperCase()}
-              </h2>
-              <span className="text-sm text-gray-400 font-medium">{todayExercises.length} exercises</span>
-            </div>
-            {plan?.notes && (
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
-                <p className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-1">Physician Note</p>
-                <p className="text-sm text-amber-800">{plan.notes}</p>
-              </div>
-            )}
-            {todayExercises.map((ae, idx) => (
-              <ExerciseCard key={ae.id} ae={ae} index={idx + 1} />
-            ))}
-          </>
+      {/* Step content */}
+      <main className="flex-1 px-4 py-6 max-w-lg mx-auto w-full">
+        {step === 'activities' && (
+          <ActivitiesStep
+            selected={selectedActivities}
+            onToggle={toggleActivity}
+            onContinue={() => setStep('session')}
+          />
+        )}
+        {step === 'session' && (
+          <SessionStep onSelect={handleSessionSelect} />
+        )}
+        {step === 'primary' && selectedSession && (
+          <PrimaryStep
+            activities={selectedActivities}
+            session={selectedSession}
+            onSelect={handlePrimarySelect}
+          />
+        )}
+        {step === 'routine' && selectedSession && (
+          <RoutineView
+            activities={selectedActivities}
+            session={selectedSession}
+            routines={routines}
+            loading={routineLoading}
+          />
         )}
       </main>
     </div>
   );
 }
 
-// ── Exercise Card (athlete view) ───────────────────────────────
+// ── Step 1: Activity selection ─────────────────────────────────
 
-function ExerciseCard({ ae, index }: { ae: AssignedExercise; index: number }) {
-  const ex       = ae.exercise!;
-  const sets     = ae.sets_override ?? ex.sets;
-  const reps     = ae.reps_override ?? ex.reps;
-  const dur      = ae.duration_sec_override ?? ex.duration_sec;
+function ActivitiesStep({ selected, onToggle, onContinue }: {
+  selected: ActivityType[];
+  onToggle: (a: ActivityType) => void;
+  onContinue: () => void;
+}) {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="font-black text-gray-900 text-2xl leading-tight"
+            style={{ fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.04em' }}>
+          WHAT ARE YOU DOING TODAY?
+        </h2>
+        <p className="text-gray-400 text-sm mt-1">Select all that apply</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        {ACTIVITIES.map(activity => {
+          const style   = ACTIVITY_STYLES[activity];
+          const isSelected = selected.includes(activity);
+          return (
+            <button
+              key={activity}
+              onClick={() => onToggle(activity)}
+              className={`flex flex-col items-center justify-center gap-2 p-6 rounded-2xl border-2 font-bold text-sm transition-all ${
+                isSelected ? style.active : style.idle
+              }`}
+              style={{ fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.05em' }}
+            >
+              <span className="text-3xl">{style.emoji}</span>
+              {ACTIVITY_LABELS[activity].toUpperCase()}
+            </button>
+          );
+        })}
+      </div>
+
+      <button
+        onClick={onContinue}
+        disabled={selected.length === 0}
+        className="w-full py-4 rounded-2xl bg-green-600 text-white font-black text-base disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+        style={{ fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.08em' }}
+      >
+        CONTINUE →
+      </button>
+    </div>
+  );
+}
+
+// ── Step 2: Session type selection ────────────────────────────
+
+function SessionStep({ onSelect }: { onSelect: (s: ExerciseCategory) => void }) {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="font-black text-gray-900 text-2xl leading-tight"
+            style={{ fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.04em' }}>
+          WHAT TYPE OF SESSION?
+        </h2>
+        <p className="text-gray-400 text-sm mt-1">Tap to continue</p>
+      </div>
+
+      <div className="space-y-3">
+        {SESSION_TYPES.map(session => {
+          const style = SESSION_STYLES[session];
+          return (
+            <button
+              key={session}
+              onClick={() => onSelect(session)}
+              className={`w-full flex items-center justify-between px-5 py-4 rounded-2xl border-2 font-bold text-base transition-all ${style.idle} hover:scale-[1.01] active:scale-[0.99]`}
+              style={{ fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.05em' }}
+            >
+              {CATEGORY_LABELS[session].toUpperCase()}
+              <ChevronRight className="w-5 h-5 opacity-50" />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Step 3: Primary activity (pre/post + multi-select) ─────────
+
+function PrimaryStep({ activities, session, onSelect }: {
+  activities: ActivityType[];
+  session: ExerciseCategory;
+  onSelect: (a: ActivityType) => void;
+}) {
+  const question = session === 'pre_training'
+    ? 'WHAT ARE YOU DOING FIRST?'
+    : 'WHAT DID YOU DO LAST?';
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="font-black text-gray-900 text-2xl leading-tight"
+            style={{ fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.04em' }}>
+          {question}
+        </h2>
+        <p className="text-gray-400 text-sm mt-1">
+          {session === 'pre_training' ? 'Select the activity you\'re about to start' : 'Select the activity you just finished'}
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        {activities.map(activity => {
+          const style = ACTIVITY_STYLES[activity];
+          return (
+            <button
+              key={activity}
+              onClick={() => onSelect(activity)}
+              className={`flex flex-col items-center justify-center gap-2 p-6 rounded-2xl border-2 font-bold text-sm transition-all ${style.idle} hover:scale-[1.02] active:scale-[0.98]`}
+              style={{ fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.05em' }}
+            >
+              <span className="text-3xl">{style.emoji}</span>
+              {ACTIVITY_LABELS[activity].toUpperCase()}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Routine view ───────────────────────────────────────────────
+
+function RoutineView({ activities, session, routines, loading }: {
+  activities: ActivityType[];
+  session: ExerciseCategory;
+  routines: ActivityRoutine[];
+  loading: boolean;
+}) {
+  const multiActivity = activities.length > 1 &&
+    session !== 'pre_training' && session !== 'post_training';
+
+  const grouped = routines.reduce<Partial<Record<ActivityType, ActivityRoutine[]>>>(
+    (acc, r) => { (acc[r.activity] ??= []).push(r); return acc; },
+    {}
+  );
+
+  const contextLabel = multiActivity
+    ? `${activities.map(a => ACTIVITY_LABELS[a]).join(' + ')} · ${CATEGORY_LABELS[session]}`
+    : `${ACTIVITY_LABELS[activities[0]]} · ${CATEGORY_LABELS[session]}`;
+
+  return (
+    <div className="space-y-4 pb-20">
+      <div>
+        <h2 className="font-black text-gray-900 text-xl"
+            style={{ fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.04em' }}>
+          YOUR ROUTINE
+        </h2>
+        <p className="text-sm text-gray-400 mt-0.5">{contextLabel}</p>
+      </div>
+
+      {loading ? (
+        <div className="space-y-3">
+          {[1, 2, 3].map(i => <div key={i} className="h-20 bg-gray-100 rounded-2xl animate-pulse" />)}
+        </div>
+      ) : routines.length === 0 ? (
+        <div className="text-center py-16">
+          <div className="text-5xl mb-3">📋</div>
+          <p className="font-bold text-gray-700 text-lg"
+             style={{ fontFamily: "'Barlow Condensed', sans-serif" }}>
+            NO EXERCISES YET
+          </p>
+          <p className="text-gray-400 text-sm mt-1">
+            Your physician hasn't added exercises to this routine yet.
+          </p>
+        </div>
+      ) : multiActivity ? (
+        Object.entries(grouped).map(([activity, exs]) => (
+          <div key={activity}>
+            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2 px-1"
+               style={{ fontFamily: "'Barlow Condensed', sans-serif" }}>
+              {ACTIVITY_LABELS[activity as ActivityType]}
+            </p>
+            <div className="space-y-3">
+              {exs!.map((r, idx) => (
+                <ExerciseCard key={r.id} routine={r} index={idx + 1} session={session} />
+              ))}
+            </div>
+          </div>
+        ))
+      ) : (
+        routines.map((r, idx) => (
+          <ExerciseCard key={r.id} routine={r} index={idx + 1} session={session} />
+        ))
+      )}
+    </div>
+  );
+}
+
+// ── Exercise card ──────────────────────────────────────────────
+
+function ExerciseCard({ routine, index, session }: {
+  routine: ActivityRoutine;
+  index: number;
+  session: ExerciseCategory;
+}) {
+  const ex   = routine.exercise!;
+  const sets = routine.sets_override ?? ex.sets;
+  const reps = routine.reps_override ?? ex.reps;
+  const dur  = routine.duration_sec_override ?? ex.duration_sec;
   const [open, setOpen] = useState(false);
 
   return (
@@ -243,8 +433,8 @@ function ExerciseCard({ ae, index }: { ae: AssignedExercise; index: number }) {
         <div className="flex-1 min-w-0">
           <p className="font-bold text-gray-900 leading-snug">{ex.name}</p>
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-            <span className={`badge text-[10px] ${CATEGORY_COLORS_LIGHT[ae.session_type]}`}>
-              {CATEGORY_LABELS[ae.session_type]}
+            <span className={`badge text-[10px] ${CATEGORY_COLORS_LIGHT[session]}`}>
+              {CATEGORY_LABELS[session]}
             </span>
             {sets && reps && (
               <span className="flex items-center gap-1 text-xs text-gray-500 font-semibold">
@@ -263,14 +453,12 @@ function ExerciseCard({ ae, index }: { ae: AssignedExercise; index: number }) {
 
       {open && (
         <div className="border-t border-gray-100 px-4 py-4 space-y-3">
-          {/* Stats row */}
           <div className="flex gap-3 flex-wrap">
             {sets  && <Stat label="Sets"     value={sets.toString()} />}
             {reps  && <Stat label="Reps"     value={reps.toString()} />}
             {dur   && <Stat label="Duration" value={formatDuration(dur)} />}
           </div>
 
-          {/* Description */}
           {ex.description && (
             <div>
               <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Instructions</p>
@@ -278,15 +466,13 @@ function ExerciseCard({ ae, index }: { ae: AssignedExercise; index: number }) {
             </div>
           )}
 
-          {/* Notes override */}
-          {ae.notes && (
+          {routine.notes && (
             <div className="bg-green-50 rounded-xl p-3 border border-green-100">
               <p className="text-[11px] font-bold text-green-600 uppercase tracking-wider mb-1">Coach Note</p>
-              <p className="text-sm text-green-800">{ae.notes}</p>
+              <p className="text-sm text-green-800">{routine.notes}</p>
             </div>
           )}
 
-          {/* Video */}
           {ex.video_url && (
             <a
               href={ex.video_url}
@@ -315,7 +501,9 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function AthletePhoto({ athlete, onUpload, uploading }: {
-  athlete: Athlete; onUpload: () => void; uploading: boolean;
+  athlete: Athlete;
+  onUpload: () => void;
+  uploading: boolean;
 }) {
   const initials = athlete.full_name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
 
