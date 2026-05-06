@@ -62,7 +62,7 @@ export default function QRCodesPage() {
 function AthleteQRCard({ athlete, appUrl }: { athlete: Athlete; appUrl: string }) {
   const qrUrl = `${appUrl}/athlete`;
   // Encode for QR API
-  const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrUrl)}&bgcolor=ffffff&color=15803d&margin=12`;
+  const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrUrl)}&bgcolor=ffffff&color=CC0000&margin=12`;
 
   return (
     <div className="card p-5 text-center flex flex-col items-center gap-3">

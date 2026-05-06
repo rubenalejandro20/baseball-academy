@@ -14,10 +14,10 @@ import { ArrowLeft, Play, Timer, RotateCcw, ChevronRight, Camera } from 'lucide-
 type Step = 'activities' | 'session' | 'primary' | 'routine';
 
 const ACTIVITY_STYLES: Record<ActivityType, { idle: string; active: string; emoji: string }> = {
-  pitching: { idle: 'bg-blue-50 border-blue-200 text-blue-800',   active: 'bg-blue-600 border-blue-600 text-white',   emoji: '⚾' },
-  catching: { idle: 'bg-amber-50 border-amber-200 text-amber-800', active: 'bg-amber-500 border-amber-500 text-white', emoji: '🧤' },
-  hitting:  { idle: 'bg-red-50 border-red-200 text-red-800',       active: 'bg-red-600 border-red-600 text-white',     emoji: '🏏' },
-  fielding: { idle: 'bg-green-50 border-green-200 text-green-800', active: 'bg-green-600 border-green-600 text-white', emoji: '🌿' },
+  pitching: { idle: 'bg-blue-50 border-blue-200 text-blue-800',   active: 'bg-blue-700 border-blue-700 text-white',   emoji: '⚾' },
+  catching: { idle: 'bg-amber-50 border-amber-200 text-amber-800', active: 'bg-amber-600 border-amber-600 text-white', emoji: '🧤' },
+  hitting:  { idle: 'bg-red-50 border-red-200 text-red-900',       active: 'bg-[#CC0000] border-[#CC0000] text-white', emoji: '🏏' },
+  fielding: { idle: 'bg-teal-50 border-teal-200 text-teal-800',   active: 'bg-teal-700 border-teal-700 text-white',   emoji: '🌿' },
 };
 
 const SESSION_STYLES: Record<ExerciseCategory, { idle: string; active: string }> = {
@@ -137,7 +137,7 @@ export default function AthleteRoutinePage() {
           CODE NOT FOUND
         </h1>
         <p className="text-gray-500 text-sm mb-6">That access code doesn't match any athlete. Check with your physician.</p>
-        <Link href="/athlete" className="px-6 py-3 rounded-2xl bg-green-600 text-white font-bold text-sm">
+        <Link href="/athlete" className="px-6 py-3 rounded-2xl bg-[#CC0000] text-white font-bold text-sm">
           Try Again
         </Link>
       </div>
@@ -147,7 +147,7 @@ export default function AthleteRoutinePage() {
   if (loadingAthlete) {
     return (
       <div className="athlete-page min-h-screen flex items-center justify-center">
-        <div className="w-8 h-8 border-3 border-green-600 border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-3 border-[#CC0000] border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -255,7 +255,7 @@ function ActivitiesStep({ selected, onToggle, onContinue }: {
       <button
         onClick={onContinue}
         disabled={selected.length === 0}
-        className="w-full py-4 rounded-2xl bg-green-600 text-white font-black text-base disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+        className="w-full py-4 rounded-2xl bg-[#CC0000] hover:bg-[#aa0000] text-white font-black text-base disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         style={{ fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.08em' }}
       >
         CONTINUE →
@@ -427,8 +427,8 @@ function ExerciseCard({ routine, index, session }: {
         className="w-full flex items-start gap-4 p-4 text-left"
         onClick={() => setOpen(v => !v)}
       >
-        <div className="w-8 h-8 rounded-xl bg-green-50 border border-green-200 flex items-center justify-center shrink-0">
-          <span className="text-xs font-black text-green-700">{index}</span>
+        <div className="w-8 h-8 rounded-xl bg-red-50 border border-red-200 flex items-center justify-center shrink-0">
+          <span className="text-xs font-black text-[#CC0000]">{index}</span>
         </div>
         <div className="flex-1 min-w-0">
           <p className="font-bold text-gray-900 leading-snug">{ex.name}</p>
@@ -467,9 +467,9 @@ function ExerciseCard({ routine, index, session }: {
           )}
 
           {routine.notes && (
-            <div className="bg-green-50 rounded-xl p-3 border border-green-100">
-              <p className="text-[11px] font-bold text-green-600 uppercase tracking-wider mb-1">Coach Note</p>
-              <p className="text-sm text-green-800">{routine.notes}</p>
+            <div className="bg-red-50 rounded-xl p-3 border border-red-100">
+              <p className="text-[11px] font-bold text-[#CC0000] uppercase tracking-wider mb-1">Coach Note</p>
+              <p className="text-sm text-red-900">{routine.notes}</p>
             </div>
           )}
 
@@ -510,15 +510,15 @@ function AthletePhoto({ athlete, onUpload, uploading }: {
   return (
     <button
       onClick={onUpload}
-      className="relative w-10 h-10 rounded-xl overflow-hidden shrink-0 border-2 border-gray-200 hover:border-green-400 transition-colors group"
+      className="relative w-10 h-10 rounded-xl overflow-hidden shrink-0 border-2 border-gray-200 hover:border-[#CC0000] transition-colors group"
       title="Tap to update photo"
     >
       {athlete.photo_url ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={athlete.photo_url} alt={athlete.full_name} className="w-full h-full object-cover" />
       ) : (
-        <div className="w-full h-full bg-green-50 flex items-center justify-center">
-          <span className="text-xs font-black text-green-700" style={{ fontFamily: "'Barlow Condensed', sans-serif" }}>
+        <div className="w-full h-full bg-red-50 flex items-center justify-center">
+          <span className="text-xs font-black text-[#CC0000]" style={{ fontFamily: "'Barlow Condensed', sans-serif" }}>
             {initials}
           </span>
         </div>

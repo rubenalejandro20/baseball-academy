@@ -30,9 +30,9 @@ export default function AdminLoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
       {/* Background */}
-      <div className="absolute inset-0 bg-[#0B1426]" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_60%_-20%,rgba(34,197,94,0.12),transparent_60%)]" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_-10%_80%,rgba(99,102,241,0.08),transparent_50%)]" />
+      <div className="absolute inset-0 bg-[#0A0A0A]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_60%_-20%,rgba(204,0,0,0.14),transparent_60%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_-10%_80%,rgba(26,39,68,0.60),transparent_50%)]" />
 
       {/* Diamond pattern dots */}
       <div className="absolute inset-0 opacity-[0.03]"

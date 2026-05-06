@@ -21,8 +21,8 @@ export default function AthleteAccessPage() {
     <div className="min-h-screen athlete-page flex flex-col items-center justify-center px-4">
       {/* Background blobs */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute -top-32 -right-32 w-96 h-96 bg-emerald-100 rounded-full blur-3xl opacity-50" />
-        <div className="absolute -bottom-32 -left-32 w-96 h-96 bg-blue-100 rounded-full blur-3xl opacity-40" />
+        <div className="absolute -top-32 -right-32 w-96 h-96 bg-red-100 rounded-full blur-3xl opacity-40" />
+        <div className="absolute -bottom-32 -left-32 w-96 h-96 bg-slate-200 rounded-full blur-3xl opacity-30" />
       </div>
 
       <div className="relative w-full max-w-sm">
@@ -66,7 +66,7 @@ export default function AthleteAccessPage() {
               value={code}
               onChange={e => setCode(e.target.value.toUpperCase())}
               placeholder="e.g. ABC123"
-              className="w-full px-4 py-4 text-center text-2xl font-mono font-bold tracking-[0.3em] rounded-2xl border-2 border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-300 focus:outline-none focus:border-green-500 focus:bg-white focus:ring-4 focus:ring-green-500/10 transition-all uppercase"
+              className="w-full px-4 py-4 text-center text-2xl font-mono font-bold tracking-[0.3em] rounded-2xl border-2 border-gray-200 bg-gray-50 text-gray-900 placeholder-gray-300 focus:outline-none focus:border-red-600 focus:bg-white focus:ring-4 focus:ring-red-600/10 transition-all uppercase"
               maxLength={12}
               autoFocus
               autoCapitalize="characters"
@@ -81,7 +81,7 @@ export default function AthleteAccessPage() {
                 letterSpacing: '0.1em',
                 background: loading || !code.trim()
                   ? '#9ca3af'
-                  : 'linear-gradient(135deg, #16a34a, #15803d)',
+                  : 'linear-gradient(135deg, #CC0000, #8B0000)',
               }}
             >
               {loading ? 'LOADING…' : 'VIEW MY EXERCISES'}
