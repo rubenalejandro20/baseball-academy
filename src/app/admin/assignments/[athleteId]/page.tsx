@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase';
+import { getStaffContext } from '@/lib/auth/getStaffContext';
 import {
   type Athlete, type Exercise, type WeeklyPlan, type AssignedExercise,
   type DayOfWeek, type ExerciseCategory,
@@ -92,10 +93,15 @@ export default function AthleteAssignmentPage() {
   async function ensurePlan(): Promise<string> {
     if (plan) return plan.id;
     setSaving(true);
+    const staffContext = await getStaffContext();
     const supabase = createClient();
     const { data } = await supabase
       .from('weekly_plans')
-      .insert({ athlete_id: athleteId, week_start: weekStart })
+      .insert({
+        athlete_id: athleteId,
+        week_start: weekStart,
+        organization_id: staffContext.status === 'ok' ? staffContext.organizationId : null,
+      })
       .select()
       .single();
     setPlan(data);

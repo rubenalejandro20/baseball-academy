@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase';
+import { getStaffContext } from '@/lib/auth/getStaffContext';
 import { type ExerciseCategory, CATEGORY_LABELS } from '@/lib/types';
 import { ArrowLeft, Save } from 'lucide-react';
 
@@ -35,15 +36,23 @@ export default function NewExercisePage() {
     const durSec = (form.duration_min ? parseInt(form.duration_min) * 60 : 0)
                  + (form.duration_sec ? parseInt(form.duration_sec) : 0);
 
+    const staffContext = await getStaffContext();
+    if (staffContext.status !== 'ok') {
+      setError('Your account is not linked to an academy. Contact your administrator.');
+      setLoading(false);
+      return;
+    }
+
     const supabase = createClient();
     const { error: err } = await supabase.from('exercises').insert({
-      name:         form.name.trim(),
-      category:     form.category,
-      description:  form.description || null,
-      sets:         form.sets ? parseInt(form.sets) : null,
-      reps:         form.reps ? parseInt(form.reps) : null,
-      duration_sec: durSec || null,
-      video_url:    form.video_url || null,
+      name:            form.name.trim(),
+      category:        form.category,
+      description:     form.description || null,
+      sets:            form.sets ? parseInt(form.sets) : null,
+      reps:            form.reps ? parseInt(form.reps) : null,
+      duration_sec:    durSec || null,
+      video_url:       form.video_url || null,
+      organization_id: staffContext.organizationId,
     });
 
     if (err) { setError(err.message); setLoading(false); }

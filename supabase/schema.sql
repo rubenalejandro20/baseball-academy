@@ -155,36 +155,93 @@ CREATE POLICY "Athlete can upload photo"
 -- ─────────────────────────────────────────────
 -- Run this in Dashboard → Storage, or uncomment if using API:
 -- INSERT INTO storage.buckets (id, name, public) VALUES ('athlete-photos', 'athlete-photos', TRUE);
+--
+-- ⚠️ CONFIRMED via Milestone 1 Step 1 production inventory: the
+-- `athlete-photos` bucket exists (public = true) but storage.objects has
+-- ZERO RLS policies of any kind in production. RLS is enabled by default
+-- on storage.objects with no exceptions, so with no policies at all,
+-- INSERT/UPDATE/DELETE (and any SELECT that isn't via the bucket's public
+-- URL) are denied to every role, including anon. Practical effect: the
+-- athlete selfie-upload feature cannot currently succeed in production —
+-- `supabase.storage.from('athlete-photos').upload(...)` fails closed for
+-- every caller. This is a pre-existing non-functional feature, not a
+-- security hole (nothing is open) and not something Milestone 1 broke.
+-- Deliberately NOT given a storage policy in Milestone 1 — see the
+-- Milestone 1 report for why a real fix needs actual athlete identity
+-- (the OTP phase), not a broad bucket-wide anon write policy.
 
 -- ─────────────────────────────────────────────
 -- 8. ACTIVITY ROUTINES
 -- ─────────────────────────────────────────────
-CREATE TYPE activity_type AS ENUM ('pitching', 'catching', 'hitting', 'fielding');
-
-CREATE TABLE IF NOT EXISTS activity_routines (
-  id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  activity              activity_type NOT NULL,
-  session_type          exercise_category NOT NULL,
-  exercise_id           UUID NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
-  sets_override         INTEGER,
-  reps_override         INTEGER,
-  duration_sec_override INTEGER,
-  notes                 TEXT,
-  sort_order            INTEGER NOT NULL DEFAULT 0,
-  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (activity, session_type, exercise_id)
-);
-
-ALTER TABLE activity_routines ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Admin full access – activity_routines"
-  ON activity_routines FOR ALL TO authenticated USING (TRUE) WITH CHECK (TRUE);
-
-CREATE POLICY "Public read activity_routines"
-  ON activity_routines FOR SELECT TO anon USING (TRUE);
+-- ⚠️ REPO/PRODUCTION DRIFT — CONFIRMED ABSENT IN PRODUCTION as of the
+-- Milestone 1 Step 1 inventory (to_regclass('public.activity_routines')
+-- returned NULL; the activity_type enum is also absent). This section was
+-- never actually applied to the live database, even though the application
+-- code (src/app/admin/routines/*, src/app/athlete/[code]/page.tsx) queries
+-- this table unconditionally. Practical effect in production: those screens
+-- silently show "no exercises yet" for everyone (supabase-js resolves
+-- {data: null, error} rather than throwing, and the code does
+-- `setRoutines(data ?? [])`) — a pre-existing, silent bug, not something
+-- Milestone 1 introduces or is responsible for fixing.
+--
+-- Left here (commented out, not deleted) as a record of the intended
+-- design. Milestone 1 deliberately does NOT create this table or enum —
+-- doing so would be introducing a feature, not preserving one, which is
+-- out of Milestone 1's scope. If/when this feature is deliberately
+-- restored, that should be its own explicit, reviewed migration.
+--
+-- CREATE TYPE activity_type AS ENUM ('pitching', 'catching', 'hitting', 'fielding');
+--
+-- CREATE TABLE IF NOT EXISTS activity_routines (
+--   id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+--   activity              activity_type NOT NULL,
+--   session_type          exercise_category NOT NULL,
+--   exercise_id           UUID NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+--   sets_override         INTEGER,
+--   reps_override         INTEGER,
+--   duration_sec_override INTEGER,
+--   notes                 TEXT,
+--   sort_order            INTEGER NOT NULL DEFAULT 0,
+--   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+--   UNIQUE (activity, session_type, exercise_id)
+-- );
+--
+-- ALTER TABLE activity_routines ENABLE ROW LEVEL SECURITY;
+--
+-- CREATE POLICY "Admin full access – activity_routines"
+--   ON activity_routines FOR ALL TO authenticated USING (TRUE) WITH CHECK (TRUE);
+--
+-- CREATE POLICY "Public read activity_routines"
+--   ON activity_routines FOR SELECT TO anon USING (TRUE);
 
 -- ─────────────────────────────────────────────
--- 9. SAMPLE DATA (optional – remove in production)
+-- 9. MILESTONE 1 — ORGANIZATIONS, STAFF ROLES, AUDIT, PIN-BRIDGE HARDENING
+-- ─────────────────────────────────────────────
+-- This file reflects the schema as it existed BEFORE Milestone 1 and is
+-- kept as historical documentation of the original single-tenant schema.
+-- Editing this file does NOT change the production database (see
+-- CLAUDE.md). The actual, reviewable Milestone 1 changes live as ordered,
+-- explicit migration files:
+--
+--   supabase/migrations/0001_milestone1_schema.sql    (additive schema)
+--   supabase/migrations/0002_milestone1_backfill.sql  (data backfill)
+--   supabase/migrations/0003_milestone1_rls.sql       (RLS cutover, section-by-section)
+--   supabase/migrations/checks/milestone1_checks.sql  (manual verification queries)
+--
+-- Summary of what they introduce: `organizations` (the academy/tenant
+-- root), `staff_profiles` (auth_user_id ↔ organization ↔ role, role =
+-- administrator/coach/physician), `platform_admins` (Super User registry,
+-- architecturally separate from any academy role — no INSERT/UPDATE/DELETE
+-- policy is ever granted to anon/authenticated), `audit_events` (append-only,
+-- written only via log_audit_event()), a nullable `organization_id` on
+-- `athletes`/`exercises`/`weekly_plans`/`activity_routines`, and a
+-- rate-limited `athlete_access_attempts`-backed PIN bridge
+-- (`get_athlete_by_code`/`update_athlete_photo_by_code`) that replaces the
+-- previously wide-open anonymous RLS policies on `athletes`. See those
+-- migration files for full detail and the exact policy changes.
+
+-- ─────────────────────────────────────────────
+-- 10. SAMPLE DATA (optional – remove in production)
 -- ─────────────────────────────────────────────
 INSERT INTO exercises (name, category, description, sets, reps, duration_sec) VALUES
   ('Hip Flexor Stretch',        'mobility',           'Kneel on one knee, push hips forward gently. Hold for 30 s each side.',                     3, NULL, 30),

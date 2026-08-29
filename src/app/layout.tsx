@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { ToastProvider } from '@/components/ui/Toast';
 
 export const metadata: Metadata = {
   title: 'Baseball Academy – Athlete Management',
@@ -14,7 +15,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="min-h-screen grain">{children}</body>
+      <body className="min-h-screen grain">
+        <ToastProvider>{children}</ToastProvider>
+      </body>
     </html>
   );
 }

@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase';
 import {
-  type Athlete, type ActivityType, type ExerciseCategory, type ActivityRoutine,
+  type AthleteLookupResult, type ActivityType, type ExerciseCategory, type ActivityRoutine,
   ACTIVITIES, ACTIVITY_LABELS, CATEGORY_LABELS, CATEGORY_COLORS_LIGHT, SESSION_TYPES,
   formatDuration,
 } from '@/lib/types';
@@ -33,10 +33,11 @@ export default function AthleteRoutinePage() {
   const { code }  = useParams<{ code: string }>();
   const fileRef   = useRef<HTMLInputElement>(null);
 
-  const [athlete, setAthlete]       = useState<Athlete | null>(null);
+  const [athlete, setAthlete]       = useState<AthleteLookupResult | null>(null);
   const [notFound, setNotFound]     = useState(false);
   const [loadingAthlete, setLoadingAthlete] = useState(true);
   const [uploading, setUploading]   = useState(false);
+  const [uploadError, setUploadError] = useState('');
 
   const [step, setStep]                     = useState<Step>('activities');
   const [selectedActivities, setSelectedActivities] = useState<ActivityType[]>([]);
@@ -44,18 +45,30 @@ export default function AthleteRoutinePage() {
   const [routines, setRoutines]             = useState<ActivityRoutine[]>([]);
   const [routineLoading, setRoutineLoading] = useState(false);
 
+  // Looked up via the rate-limited get_athlete_by_code RPC (through a server
+  // route so the rate limiter can key off a real client IP), not a direct
+  // table read — this is the temporary PIN-bridge path, replaced by email
+  // OTP in a later milestone. Only the minimum fields the UI needs are
+  // returned (no access_code, age, weight, or notes).
   useEffect(() => {
     async function load() {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from('athletes')
-        .select('*')
-        .eq('access_code', code.toUpperCase())
-        .eq('is_active', true)
-        .maybeSingle();
-      if (!data) setNotFound(true);
-      else setAthlete(data);
-      setLoadingAthlete(false);
+      try {
+        const res = await fetch('/api/athlete/lookup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
+        });
+        const body = await res.json();
+        if (!res.ok || !body.athlete) {
+          setNotFound(true);
+        } else {
+          setAthlete(body.athlete);
+        }
+      } catch {
+        setNotFound(true);
+      } finally {
+        setLoadingAthlete(false);
+      }
     }
     load();
   }, [code]);
@@ -64,6 +77,7 @@ export default function AthleteRoutinePage() {
     const file = e.target.files?.[0];
     if (!file || !athlete) return;
     setUploading(true);
+    setUploadError('');
     try {
       const supabase = createClient();
       const ext  = file.name.split('.').pop();
@@ -71,8 +85,22 @@ export default function AthleteRoutinePage() {
       const { error } = await supabase.storage.from('athlete-photos').upload(path, file, { upsert: true });
       if (!error) {
         const { data: { publicUrl } } = supabase.storage.from('athlete-photos').getPublicUrl(path);
-        await supabase.from('athletes').update({ photo_url: publicUrl }).eq('id', athlete.id);
-        setAthlete(a => a ? { ...a, photo_url: publicUrl } : a);
+        const res = await fetch('/api/athlete/photo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, photoUrl: publicUrl }),
+        });
+        if (res.ok) {
+          setAthlete(a => a ? { ...a, photo_url: publicUrl } : a);
+        } else {
+          setUploadError('Could not update photo. Please try again.');
+        }
+      } else {
+        // Storage upload itself failed (e.g. no storage.objects policy
+        // currently permits it) — previously this failed completely
+        // silently. Surfacing it explicitly rather than leaving the
+        // athlete guessing why nothing happened.
+        setUploadError('Photo upload is temporarily unavailable.');
       }
     } finally {
       setUploading(false);
@@ -182,6 +210,10 @@ export default function AthleteRoutinePage() {
         </div>
         <input ref={fileRef} type="file" accept="image/*" capture="user" className="hidden" onChange={handlePhotoUpload} />
       </header>
+
+      {uploadError && (
+        <p className="text-xs text-red-600 bg-red-50 px-4 py-2 text-center">{uploadError}</p>
+      )}
 
       {/* Step content */}
       <main className="flex-1 px-4 py-6 max-w-lg mx-auto w-full">
@@ -501,7 +533,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function AthletePhoto({ athlete, onUpload, uploading }: {
-  athlete: Athlete;
+  athlete: AthleteLookupResult;
   onUpload: () => void;
   uploading: boolean;
 }) {

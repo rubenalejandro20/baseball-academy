@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import Link from 'next/link';
 import { createClient } from '@/lib/supabase';
+import { getStaffContext, type StaffContextResult } from '@/lib/auth/getStaffContext';
+import { AppShell, type NavItem } from '@/components/shell/AppShell';
 import {
-  LayoutDashboard, Users, Dumbbell, Layers, LogOut, Menu, X, Activity, QrCode
+  LayoutDashboard, Users, Dumbbell, Layers, Activity, QrCode
 } from 'lucide-react';
 
-const NAV = [
+const NAV: NavItem[] = [
   { href: '/admin/dashboard', label: 'Dashboard',       icon: LayoutDashboard },
   { href: '/admin/athletes',  label: 'Athletes',         icon: Users },
   { href: '/admin/exercises', label: 'Exercise Library', icon: Dumbbell },
@@ -16,27 +17,35 @@ const NAV = [
   { href: '/admin/qrcodes',   label: 'QR Codes',         icon: QrCode },
 ];
 
+type GuardState = 'checking' | 'authorized' | 'not_linked';
+
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router   = useRouter();
   const pathname = usePathname();
-  const [open, setOpen]           = useState(false);
-  const [userEmail, setUserEmail] = useState('');
-  const [authorized, setAuthorized] = useState(false);
+  const [state, setState]         = useState<GuardState>('checking');
+  const [context, setContext]     = useState<Extract<StaffContextResult, { status: 'ok' }> | null>(null);
 
   useEffect(() => {
     if (pathname === '/admin/login') {
-      setAuthorized(true);
+      setState('authorized');
       return;
     }
-    const supabase = createClient();
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) {
+
+    let cancelled = false;
+
+    getStaffContext().then(result => {
+      if (cancelled) return;
+      if (result.status === 'no_session') {
         router.replace('/admin/login');
+      } else if (result.status === 'not_linked') {
+        setState('not_linked');
       } else {
-        setUserEmail(session.user.email ?? '');
-        setAuthorized(true);
+        setContext(result);
+        setState('authorized');
       }
     });
+
+    return () => { cancelled = true; };
   }, [router, pathname]);
 
   async function handleLogout() {
@@ -45,102 +54,37 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     router.replace('/admin/login');
   }
 
-  function isActive(href: string) {
-    if (href === '/admin/dashboard') return pathname === href;
-    return pathname.startsWith(href);
-  }
-
-  if (!authorized) return (
+  if (state === 'checking') return (
     <div className="min-h-screen flex items-center justify-center bg-[#0B1426]">
       <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
     </div>
   );
 
-  return (
-    <div className="flex min-h-screen">
-      <aside className="hidden lg:flex flex-col w-60 shrink-0 border-r border-[var(--border)] bg-[var(--bg-secondary)] fixed h-full z-20">
-        <SidebarContent nav={NAV} isActive={isActive} userEmail={userEmail} onLogout={handleLogout} />
-      </aside>
-
-      {open && (
-        <div className="lg:hidden fixed inset-0 z-40">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setOpen(false)} />
-          <aside className="relative w-60 h-full border-r border-[var(--border)] bg-[var(--bg-secondary)] flex flex-col animate-slide-in-right">
-            <SidebarContent nav={NAV} isActive={isActive} userEmail={userEmail} onLogout={handleLogout} onClose={() => setOpen(false)} />
-          </aside>
-        </div>
-      )}
-
-      <div className="flex-1 flex flex-col lg:ml-60 min-w-0">
-        <header className="lg:hidden flex items-center justify-between px-4 h-14 border-b border-[var(--border)] bg-[var(--bg-secondary)] sticky top-0 z-10">
-          <button onClick={() => setOpen(true)} className="p-2 rounded-lg hover:bg-white/10 text-slate-400" aria-label="Open menu">
-            <Menu className="w-5 h-5" />
-          </button>
-          <div className="flex items-center gap-2">
-            <Activity className="w-5 h-5 text-brand-500" />
-            <span className="font-display font-bold text-sm tracking-wide text-white">7AR BASEBALL ACADEMY</span>
-          </div>
-          <div className="w-9" />
-        </header>
-        <main className="flex-1 p-4 md:p-6 lg:p-8 animate-fade-in">
-          {children}
-        </main>
-      </div>
-    </div>
-  );
-}
-
-function SidebarContent({
-  nav, isActive, userEmail, onLogout, onClose,
-}: {
-  nav: typeof NAV;
-  isActive: (href: string) => boolean;
-  userEmail: string;
-  onLogout: () => void;
-  onClose?: () => void;
-}) {
-  return (
-    <>
-      <div className="flex items-center justify-between px-5 h-16 border-b border-[var(--border)] shrink-0">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-brand-500/15 border border-brand-500/30 flex items-center justify-center">
-            <img src="/7ARlogo.png" alt="7AR Baseball Academy" className="w-6 h-6 object-contain" />
-          </div>
-          <div>
-            <p className="font-display font-bold text-sm tracking-widest text-white leading-none">7AR ACADEMY</p>
-            <p className="text-[10px] text-slate-500 tracking-wide leading-none mt-0.5">PERFORMANCE</p>
-          </div>
-        </div>
-        {onClose && (
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400">
-            <X className="w-4 h-4" />
-          </button>
-        )}
-      </div>
-
-      <nav className="flex-1 px-3 py-4 space-y-0.5">
-        {nav.map(({ href, label, icon: Icon }) => (
-          <Link key={href} href={href} onClick={onClose}
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-              isActive(href) ? 'bg-brand-500/15 text-brand-400 border border-brand-500/25' : 'text-slate-400 hover:text-white hover:bg-white/6'
-            }`}
-          >
-            <Icon className="w-4 h-4 shrink-0" />
-            {label}
-          </Link>
-        ))}
-      </nav>
-
-      <div className="px-3 py-4 border-t border-[var(--border)]">
-        <div className="px-3 py-2 mb-2">
-          <p className="text-xs text-slate-500 truncate">{userEmail}</p>
-          <p className="text-[11px] text-slate-600">Physician / Admin</p>
-        </div>
-        <button onClick={onLogout} className="flex w-full items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all">
-          <LogOut className="w-4 h-4" />
+  // A valid Supabase session exists, but no active staff_profiles row was
+  // found for it. Surfaced explicitly rather than silently bounced to
+  // /admin/login, which would look identical to a wrong password and hide
+  // the real cause (e.g. the Milestone 1 backfill hasn't run for this
+  // account, or the account was deactivated).
+  if (state === 'not_linked') return (
+    <div className="min-h-screen flex items-center justify-center bg-[#0B1426] px-4">
+      <div className="card p-8 max-w-sm text-center">
+        <h1 className="font-display text-xl font-bold text-white tracking-wide mb-2">
+          ACCOUNT NOT LINKED
+        </h1>
+        <p className="text-sm text-slate-400">
+          Your login was successful, but this account isn&apos;t linked to an academy yet.
+          Contact your administrator or platform support.
+        </p>
+        <button onClick={handleLogout} className="btn-secondary mt-6 mx-auto">
           Sign out
         </button>
       </div>
-    </>
+    </div>
+  );
+
+  return (
+    <AppShell nav={NAV} userEmail={context?.email ?? ''} role={context?.role} onLogout={handleLogout}>
+      {children}
+    </AppShell>
   );
 }

@@ -192,3 +192,62 @@ export const ACTIVITY_LABELS: Record<ActivityType, string> = {
 export const SESSION_TYPES: ExerciseCategory[] = [
   'pre_training', 'post_training', 'recovery', 'mobility', 'strength', 'injury_prevention',
 ];
+
+// ─────────────────────────────────────────────
+// Milestone 1: Organizations, Staff Roles, Audit
+// ─────────────────────────────────────────────
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string | null;
+  timezone: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type StaffRole = 'administrator' | 'coach' | 'physician';
+
+export interface StaffProfile {
+  id: string;
+  auth_user_id: string;
+  organization_id: string;
+  full_name: string;
+  email: string;
+  role: StaffRole;
+  is_active: boolean;
+  invited_by: string | null;
+  invited_at: string | null;
+  joined_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlatformAdmin {
+  id: string;
+  auth_user_id: string;
+  created_at: string;
+  created_by: string | null;
+}
+
+export interface AuditEvent {
+  id: string;
+  organization_id: string | null;
+  actor_auth_user_id: string | null;
+  actor_role: string | null;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+// Minimal athlete shape returned by the rate-limited get_athlete_by_code RPC —
+// intentionally NOT the full Athlete row (no access_code, age, weight, notes).
+export interface AthleteLookupResult {
+  id: string;
+  full_name: string;
+  position: string | null;
+  photo_url: string | null;
+}

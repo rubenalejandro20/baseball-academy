@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase';
+import { getStaffContext } from '@/lib/auth/getStaffContext';
 import { BASEBALL_POSITIONS } from '@/lib/types';
 import { ArrowLeft, Save } from 'lucide-react';
 
@@ -35,14 +36,22 @@ export default function NewAthletePage() {
     setError('');
     setLoading(true);
 
+    const staffContext = await getStaffContext();
+    if (staffContext.status !== 'ok') {
+      setError('Your account is not linked to an academy. Contact your administrator.');
+      setLoading(false);
+      return;
+    }
+
     const supabase = createClient();
     const { data, error: err } = await supabase.from('athletes').insert({
-      full_name:   form.full_name.trim(),
-      age:         form.age         ? parseInt(form.age)          : null,
-      weight_lbs:  form.weight_lbs  ? parseFloat(form.weight_lbs) : null,
-      position:    form.position    || null,
-      access_code: form.access_code.trim().toUpperCase(),
-      notes:       form.notes       || null,
+      full_name:       form.full_name.trim(),
+      age:             form.age         ? parseInt(form.age)          : null,
+      weight_lbs:      form.weight_lbs  ? parseFloat(form.weight_lbs) : null,
+      position:        form.position    || null,
+      access_code:     form.access_code.trim().toUpperCase(),
+      notes:           form.notes       || null,
+      organization_id: staffContext.organizationId,
     }).select().single();
 
     if (err) {

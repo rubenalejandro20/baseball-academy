@@ -30,7 +30,8 @@ This is a Next.js 14 App Router app using Supabase (PostgreSQL + Auth + Storage)
 
 **Admin/Physician side** (`/admin/`) — Protected by Supabase Auth, dark navy + emerald theme:
 - `layout.tsx` is the auth guard — it runs a client-side `useEffect` + `getSession()` check and redirects unauthenticated users to `/admin/login`
-- Covers: dashboard stats, athlete CRUD, exercise library CRUD, routine management (24 slots), QR code generation
+- Sidebar nav covers: dashboard stats, athlete CRUD, exercise library CRUD, routine management (24 slots), QR code generation
+- `/admin/assignments` and `/admin/assignments/[athleteId]` are a second, older per-athlete weekly planner (day-of-week × session-type grid backed by `weekly_plans`/`assigned_exercises`). It has no sidebar entry but is still fully wired up — linked from the dashboard, the athletes list, and each athlete's detail page — so treat it as live code, not dead code, despite `assigned_exercises`/`weekly_plans` being called "legacy" in the DB schema comments.
 
 **Athlete side** (`/athlete/`) — No authentication, light mobile-first theme:
 - Athletes identify themselves via a PIN/access code (not user accounts)
@@ -54,9 +55,9 @@ The root `/` redirects to `/admin/login`.
 |-------|---------|
 | `athletes` | Athlete profiles; `access_code` is the PIN athletes use; `is_active` for soft deletes |
 | `exercises` | Exercise library; `category` is `exercise_category` enum |
-| `activity_routines` | 24-slot routine system (4 activities × 6 session types); each row = one exercise assigned to a slot with optional overrides |
-| `weekly_plans` | Legacy — no longer used by the UI but preserved in DB |
-| `assigned_exercises` | Legacy — no longer used by the UI but preserved in DB |
+| `activity_routines` | 24-slot routine system (4 activities × 6 session types), shared across all athletes; this is what `/athlete/[code]` reads |
+| `weekly_plans` | One row per athlete per week; still editable via `/admin/assignments/[athleteId]` but not surfaced to athletes |
+| `assigned_exercises` | Exercises assigned to a `weekly_plans` row for a given day + session type; same caveat as above |
 
 `activity_routines` has a unique constraint on `(activity, session_type, exercise_id)`. The `activity` column uses the `activity_type` enum: `pitching`, `catching`, `hitting`, `fielding`.
 

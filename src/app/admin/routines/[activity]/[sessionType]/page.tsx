@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase';
+import { getStaffContext } from '@/lib/auth/getStaffContext';
 import {
   type Exercise, type ActivityType, type ExerciseCategory, type ActivityRoutine,
   ACTIVITY_LABELS, CATEGORY_LABELS, CATEGORY_COLORS, SESSION_TYPES, ACTIVITIES,
@@ -51,14 +52,20 @@ export default function RoutineSlotPage() {
 
   async function addExercise(exercise: Exercise) {
     setSaving(true);
+    const staffContext = await getStaffContext();
+    if (staffContext.status !== 'ok') {
+      setSaving(false);
+      return;
+    }
     const supabase = createClient();
     const { data } = await supabase
       .from('activity_routines')
       .insert({
-        activity:     act,
-        session_type: sess,
-        exercise_id:  exercise.id,
-        sort_order:   routines.length,
+        activity:        act,
+        session_type:    sess,
+        exercise_id:     exercise.id,
+        sort_order:      routines.length,
+        organization_id: staffContext.organizationId,
       })
       .select('*, exercise:exercises(*)')
       .single();
