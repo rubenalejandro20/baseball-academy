@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase';
@@ -9,9 +9,36 @@ import {
   ACTIVITIES, ACTIVITY_LABELS, CATEGORY_LABELS, CATEGORY_COLORS_LIGHT, SESSION_TYPES,
   formatDuration,
 } from '@/lib/types';
-import { ArrowLeft, Play, Timer, RotateCcw, ChevronRight, Camera } from 'lucide-react';
+import { ArrowLeft, Play, Timer, RotateCcw, ChevronRight } from 'lucide-react';
 
 type Step = 'activities' | 'session' | 'primary' | 'routine';
+
+// Flat row shape returned by the get_athlete_routines() RPC — a plpgsql
+// function returns tabular rows, so the joined exercise comes back
+// ex_-prefixed rather than nested; reshaped into ActivityRoutine below.
+interface RoutineRpcRow {
+  id: string;
+  activity: ActivityType;
+  session_type: ExerciseCategory;
+  exercise_id: string;
+  sets_override: number | null;
+  reps_override: number | null;
+  duration_sec_override: number | null;
+  notes: string | null;
+  sort_order: number;
+  created_at: string;
+  ex_id: string;
+  ex_name: string;
+  ex_category: ExerciseCategory;
+  ex_description: string | null;
+  ex_sets: number | null;
+  ex_reps: number | null;
+  ex_duration_sec: number | null;
+  ex_video_url: string | null;
+  ex_is_active: boolean;
+  ex_created_at: string;
+  ex_updated_at: string;
+}
 
 const ACTIVITY_STYLES: Record<ActivityType, { idle: string; active: string; emoji: string }> = {
   pitching: { idle: 'bg-blue-50 border-blue-200 text-blue-800',   active: 'bg-blue-700 border-blue-700 text-white',   emoji: '⚾' },
@@ -31,19 +58,17 @@ const SESSION_STYLES: Record<ExerciseCategory, { idle: string; active: string }>
 
 export default function AthleteRoutinePage() {
   const { code }  = useParams<{ code: string }>();
-  const fileRef   = useRef<HTMLInputElement>(null);
 
   const [athlete, setAthlete]       = useState<AthleteLookupResult | null>(null);
   const [notFound, setNotFound]     = useState(false);
   const [loadingAthlete, setLoadingAthlete] = useState(true);
-  const [uploading, setUploading]   = useState(false);
-  const [uploadError, setUploadError] = useState('');
 
   const [step, setStep]                     = useState<Step>('activities');
   const [selectedActivities, setSelectedActivities] = useState<ActivityType[]>([]);
   const [selectedSession, setSelectedSession]       = useState<ExerciseCategory | null>(null);
   const [routines, setRoutines]             = useState<ActivityRoutine[]>([]);
   const [routineLoading, setRoutineLoading] = useState(false);
+  const [routineError, setRoutineError]     = useState(false);
 
   // Looked up via the rate-limited get_athlete_by_code RPC (through a server
   // route so the rate limiter can key off a real client IP), not a direct
@@ -73,57 +98,58 @@ export default function AthleteRoutinePage() {
     load();
   }, [code]);
 
-  async function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file || !athlete) return;
-    setUploading(true);
-    setUploadError('');
-    try {
-      const supabase = createClient();
-      const ext  = file.name.split('.').pop();
-      const path = `athletes/${athlete.id}.${ext}`;
-      const { error } = await supabase.storage.from('athlete-photos').upload(path, file, { upsert: true });
-      if (!error) {
-        const { data: { publicUrl } } = supabase.storage.from('athlete-photos').getPublicUrl(path);
-        const res = await fetch('/api/athlete/photo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code, photoUrl: publicUrl }),
-        });
-        if (res.ok) {
-          setAthlete(a => a ? { ...a, photo_url: publicUrl } : a);
-        } else {
-          setUploadError('Could not update photo. Please try again.');
-        }
-      } else {
-        // Storage upload itself failed (e.g. no storage.objects policy
-        // currently permits it) — previously this failed completely
-        // silently. Surfacing it explicitly rather than leaving the
-        // athlete guessing why nothing happened.
-        setUploadError('Photo upload is temporarily unavailable.');
-      }
-    } finally {
-      setUploading(false);
-    }
-  }
-
   function toggleActivity(activity: ActivityType) {
     setSelectedActivities(prev =>
       prev.includes(activity) ? prev.filter(a => a !== activity) : [...prev, activity]
     );
   }
 
+  // Routed through the get_athlete_routines() RPC rather than a direct
+  // `.from('activity_routines')` read — that table has no anonymous SELECT
+  // policy at all (see 0005_milestone2_activity_routines_rls_rpc.sql). The
+  // RPC re-derives this athlete's organization_id server-side from `code`
+  // and can never be asked for (or leak) another organization's routines.
   async function loadRoutines(activities: ActivityType[], session: ExerciseCategory) {
     setRoutineLoading(true);
+    setRoutineError(false);
     const supabase = createClient();
-    const { data } = await supabase
-      .from('activity_routines')
-      .select('*, exercise:exercises(*)')
-      .in('activity', activities)
-      .eq('session_type', session)
-      .order('activity')
-      .order('sort_order');
-    setRoutines(data ?? []);
+    const { data, error } = await supabase.rpc('get_athlete_routines', {
+      p_code: code,
+      p_activities: activities,
+      p_session_type: session,
+    });
+    if (error) {
+      setRoutineError(true);
+      setRoutines([]);
+    } else {
+      setRoutines(
+        ((data ?? []) as RoutineRpcRow[]).map(row => ({
+          id: row.id,
+          activity: row.activity,
+          session_type: row.session_type,
+          exercise_id: row.exercise_id,
+          sets_override: row.sets_override,
+          reps_override: row.reps_override,
+          duration_sec_override: row.duration_sec_override,
+          notes: row.notes,
+          sort_order: row.sort_order,
+          created_at: row.created_at,
+          exercise: {
+            id: row.ex_id,
+            name: row.ex_name,
+            category: row.ex_category,
+            description: row.ex_description,
+            sets: row.ex_sets,
+            reps: row.ex_reps,
+            duration_sec: row.ex_duration_sec,
+            video_url: row.ex_video_url,
+            is_active: row.ex_is_active,
+            created_at: row.ex_created_at,
+            updated_at: row.ex_updated_at,
+          },
+        }))
+      );
+    }
     setRoutineLoading(false);
   }
 
@@ -199,7 +225,7 @@ export default function AthleteRoutinePage() {
           </Link>
         )}
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          <AthletePhoto athlete={athlete!} onUpload={() => fileRef.current?.click()} uploading={uploading} />
+          <AthletePhoto athlete={athlete!} />
           <div className="min-w-0">
             <p className="font-black text-gray-900 text-sm leading-tight truncate"
                style={{ fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: '0.05em' }}>
@@ -208,12 +234,7 @@ export default function AthleteRoutinePage() {
             <p className="text-xs text-gray-400">{athlete?.position ?? 'Athlete'}</p>
           </div>
         </div>
-        <input ref={fileRef} type="file" accept="image/*" capture="user" className="hidden" onChange={handlePhotoUpload} />
       </header>
-
-      {uploadError && (
-        <p className="text-xs text-red-600 bg-red-50 px-4 py-2 text-center">{uploadError}</p>
-      )}
 
       {/* Step content */}
       <main className="flex-1 px-4 py-6 max-w-lg mx-auto w-full">
@@ -240,6 +261,7 @@ export default function AthleteRoutinePage() {
             session={selectedSession}
             routines={routines}
             loading={routineLoading}
+            error={routineError}
           />
         )}
       </main>
@@ -374,11 +396,12 @@ function PrimaryStep({ activities, session, onSelect }: {
 
 // ── Routine view ───────────────────────────────────────────────
 
-function RoutineView({ activities, session, routines, loading }: {
+function RoutineView({ activities, session, routines, loading, error }: {
   activities: ActivityType[];
   session: ExerciseCategory;
   routines: ActivityRoutine[];
   loading: boolean;
+  error: boolean;
 }) {
   const multiActivity = activities.length > 1 &&
     session !== 'pre_training' && session !== 'post_training';
@@ -405,6 +428,17 @@ function RoutineView({ activities, session, routines, loading }: {
       {loading ? (
         <div className="space-y-3">
           {[1, 2, 3].map(i => <div key={i} className="h-20 bg-gray-100 rounded-2xl animate-pulse" />)}
+        </div>
+      ) : error ? (
+        <div className="text-center py-16">
+          <div className="text-5xl mb-3">⚠️</div>
+          <p className="font-bold text-gray-700 text-lg"
+             style={{ fontFamily: "'Barlow Condensed', sans-serif" }}>
+            COULDN'T LOAD YOUR ROUTINE
+          </p>
+          <p className="text-gray-400 text-sm mt-1">
+            Please check your connection and try again.
+          </p>
         </div>
       ) : routines.length === 0 ? (
         <div className="text-center py-16">
@@ -532,19 +566,21 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function AthletePhoto({ athlete, onUpload, uploading }: {
+// Athlete self-photo upload is intentionally disabled here (poster/V1):
+// Supabase Storage has no RLS policies permitting anon uploads to
+// `athlete-photos` today, so the upload flow could never succeed anyway.
+// This is display-only until the secure, server-mediated upload flow
+// (signed upload URL issued after re-validating the access code, per the
+// athlete photo upload investigation) replaces it post-launch. The
+// existing athletes.photo_url / update_athlete_photo_by_code / /api/athlete/photo
+// pieces are untouched and ready for that follow-up.
+function AthletePhoto({ athlete }: {
   athlete: AthleteLookupResult;
-  onUpload: () => void;
-  uploading: boolean;
 }) {
   const initials = athlete.full_name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
 
   return (
-    <button
-      onClick={onUpload}
-      className="relative w-10 h-10 rounded-xl overflow-hidden shrink-0 border-2 border-gray-200 hover:border-[#CC0000] transition-colors group"
-      title="Tap to update photo"
-    >
+    <div className="relative w-10 h-10 rounded-xl overflow-hidden shrink-0 border-2 border-gray-200">
       {athlete.photo_url ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={athlete.photo_url} alt={athlete.full_name} className="w-full h-full object-cover" />
@@ -555,14 +591,6 @@ function AthletePhoto({ athlete, onUpload, uploading }: {
           </span>
         </div>
       )}
-      <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-        <Camera className="w-3 h-3 text-white" />
-      </div>
-      {uploading && (
-        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-        </div>
-      )}
-    </button>
+    </div>
   );
 }

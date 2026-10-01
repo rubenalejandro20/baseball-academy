@@ -14,13 +14,20 @@ type SlotCounts = Record<string, number>;
 export default function RoutinesPage() {
   const [counts, setCounts]   = useState<SlotCounts>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     async function load() {
       const supabase = createClient();
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('activity_routines')
         .select('activity, session_type');
+
+      if (error) {
+        setLoadError(true);
+        setLoading(false);
+        return;
+      }
 
       const c: SlotCounts = {};
       for (const row of data ?? []) {
@@ -40,6 +47,11 @@ export default function RoutinesPage() {
         <p className="text-slate-400 text-sm mt-0.5">
           Manage exercise routines for each activity and session type
         </p>
+        {loadError && (
+          <p className="text-red-400 text-sm mt-2">
+            Couldn't load routine counts. Try refreshing the page.
+          </p>
+        )}
       </div>
 
       {ACTIVITIES.map(activity => (

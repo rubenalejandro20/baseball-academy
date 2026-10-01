@@ -1,23 +1,35 @@
 // ============================================================
-// Milestone 1 — local migration/RLS test suite (PGlite, no Docker required)
+// Milestone 1 + 2 — local migration/RLS test suite (PGlite, no Docker required)
 // ============================================================
-// Runs migrations 0001 -> 0002 -> 0003 against a fresh, disposable, embedded
-// Postgres (WASM, via @electric-sql/pglite) that faithfully supports real
-// roles, RLS, triggers, and PL/pgSQL — the same primitives Supabase uses.
-// This validates the SQL/RLS/trigger/RPC LOGIC end-to-end; it does not spin
-// up GoTrue/PostgREST, so it cannot test actual HTTP/JWT issuance — only
-// the database layer, which is where all of Milestone 1's real logic lives.
+// Runs migrations 0001 -> 0002 -> 0003 -> 0004 -> 0005 against a fresh,
+// disposable, embedded Postgres (WASM, via @electric-sql/pglite) that
+// faithfully supports real roles, RLS, triggers, and PL/pgSQL — the same
+// primitives Supabase uses. This validates the SQL/RLS/trigger/RPC LOGIC
+// end-to-end; it does not spin up GoTrue/PostgREST, so it cannot test
+// actual HTTP/JWT issuance — only the database layer.
 //
 // REVISED after the Milestone 1 Step 1 production inventory:
 //   - schema.sql's activity_routines section is now commented out (confirmed
 //     absent in production), so loading schema.sql as the baseline already
-//     matches production reality without any special-casing here.
+//     matches production reality without any special-casing here. Note this
+//     baseline reflects the state BEFORE Milestone 2's 0004/0005 (below) —
+//     it is schema.sql alone that must never define this table, not the
+//     final state of this test run.
 //   - 0002's staff backfill is no longer a blanket "every auth.users row"
 //     statement (Part A, automated) — staff onboarding is now an explicit
 //     per-account statement (Part B / Step B1) with a placeholder email.
 //     This suite executes the ACTUAL file content with the placeholder
 //     substituted, so it proves the real documented instructions work, not
 //     a re-typed equivalent.
+//
+// EXTENDED for Milestone 2 (activity_routines): after the full Milestone 1
+// flow (0001-0003) and its existing assertions — including the ones that
+// confirm activity_routines is STILL absent immediately after 0003, which
+// remains true and correct, since 0004/0005 haven't run yet at that point
+// in this script — a new section applies 0004 and 0005 and exercises the
+// new table's schema, RLS, and the get_athlete_routines() RPC, reusing the
+// same org A / org B / athlete fixtures already built up earlier in this
+// file rather than duplicating them.
 //
 // Usage: node supabase/migrations/checks/run_migration_tests.mjs
 //   (or: npm run test:db)
@@ -128,7 +140,7 @@ async function main() {
   await expectSucceeds(db, schemaSql, 'Baseline schema.sql applies cleanly (matches confirmed production: no activity_routines)');
 
   const preMigrationCheck = await db.query(`select to_regclass('public.activity_routines') as t;`);
-  record('Baseline confirms activity_routines does NOT exist (matches production inventory)', preMigrationCheck.rows[0].t === null);
+  record('Baseline (schema.sql alone) confirms activity_routines does NOT exist (matches production inventory; Milestone 2\'s 0004/0005 below are what create it)', preMigrationCheck.rows[0].t === null);
 
   // Supabase grants broad table privileges to anon/authenticated by default
   // (RLS is the only thing restricting row access) — replicated here so the
@@ -307,7 +319,7 @@ async function main() {
   await asAdmin(db);
 
   const postMigrationCheck = await db.query(`select to_regclass('public.activity_routines') as t;`);
-  record('After all 3 migrations, activity_routines STILL does not exist (no regression re-introducing it)', postMigrationCheck.rows[0].t === null);
+  record('After Milestone 1 (0001-0003) alone, activity_routines still does not exist (Milestone 2\'s 0004/0005, applied later in this run, are what create it — see section 20 below)', postMigrationCheck.rows[0].t === null);
 
   // ── 3) Verify backfill correctness ───────────────────────────────────────
   const orgRows = await db.query(`select id from organizations where slug = '7ar-baseball-academy';`);
@@ -436,10 +448,10 @@ async function main() {
   // = 11. Anon sees ALL of them regardless of org — this is exactly the
   // documented, temporary, not-yet-org-scoped compatibility gap (see 0003).
   const anonExercises = await db.query(`select * from exercises;`);
-  record('Anonymous: exercises SELECT still succeeds (intentional PIN-bridge policy)', anonExercises.rows.length === 11, `got ${anonExercises.rows.length} rows`);
+  record('Anonymous: exercises SELECT still succeeds at this point in the run (intentional PIN-bridge policy, BEFORE 0006 removes it — see section 21 for the real anon-denial test once it\'s gone)', anonExercises.rows.length === 11, `got ${anonExercises.rows.length} rows`);
   await expectThrows(db, `insert into exercises (name, category) values ('hack', 'mobility');`, 'Anonymous: exercises INSERT denied', undefined);
   const anonActivityRoutinesCheck = await db.query(`select to_regclass('public.activity_routines') as t;`);
-  record('Anonymous access check for activity_routines: N/A, table confirmed absent (nothing to test)', anonActivityRoutinesCheck.rows[0].t === null);
+  record('Anonymous access check for activity_routines at this point in the run: N/A, table still absent (Milestone 2 not applied yet — see section 20 for the real anon-denial test once it exists)', anonActivityRoutinesCheck.rows[0].t === null);
   await db.exec(`update athletes set full_name = 'Hacked' where id = '${athleteAId}';`); // RLS silently filters to 0 matching rows, no error
   await asAdmin(db);
   const realCheck = await db.query(`select full_name from athletes where id = '${athleteAId}';`);
@@ -584,6 +596,280 @@ async function main() {
     `update staff_profiles set full_name = 'Coach A Renamed' where auth_user_id = '${coachId}';`,
     'Identity-protection trigger: non-protected fields (e.g. full_name) can still be updated via a privileged write'
   );
+
+  // ── 20) MILESTONE 2 — activity_routines schema + RLS + athlete RPC ──────
+  // Reuses fixtures already built up above rather than duplicating them:
+  //   orgA / orgB               — the two organizations
+  //   coachId                   — active org A staff (unaffected by the
+  //                                last-admin-guard mutations above)
+  //   orgBAdminId                — active org B staff
+  //   ownerId                   — org A administrator AND Super User
+  //   athleteAId / 'AAA111'     — org A athlete
+  //   athleteBId / 'BBB111'     — org B athlete
+  //   exA / exB / exGlobal      — org A-private / org B-private / shared exercises
+  await asAdmin(db);
+
+  const m0004 = readFileSync(join(migrationsDir, '0004_milestone2_activity_routines_schema.sql'), 'utf8');
+  await expectSucceeds(db, m0004, '0004_milestone2_activity_routines_schema.sql applies cleanly');
+
+  const postM0004Check = await db.query(`select to_regclass('public.activity_routines') as t;`);
+  record('Milestone 2: activity_routines now exists after 0004', postM0004Check.rows[0].t !== null);
+
+  await expectSucceeds(db, m0004, '0004_milestone2_activity_routines_schema.sql is safely RE-RUNNABLE (applied a second time, no errors)');
+
+  const rlsEnabledCheck = await db.query(`select relrowsecurity from pg_class where relname = 'activity_routines';`);
+  record('Milestone 2: RLS is enabled on activity_routines', rlsEnabledCheck.rows[0]?.relrowsecurity === true);
+
+  const colsCheck = await db.query(`
+    select column_name, is_nullable from information_schema.columns
+    where table_schema = 'public' and table_name = 'activity_routines';
+  `);
+  const colNames = colsCheck.rows.map(r => r.column_name).sort();
+  const expectedCols = [
+    'activity', 'created_at', 'duration_sec_override', 'exercise_id', 'id',
+    'notes', 'organization_id', 'reps_override', 'session_type', 'sets_override', 'sort_order',
+  ].sort();
+  record(
+    'Milestone 2: activity_routines has exactly the expected columns',
+    JSON.stringify(colNames) === JSON.stringify(expectedCols),
+    `got: ${colNames.join(', ')}`
+  );
+
+  const orgIdCol = colsCheck.rows.find(r => r.column_name === 'organization_id');
+  record('Milestone 2: organization_id is NOT NULL', orgIdCol?.is_nullable === 'NO');
+
+  const uniqueConstraintCheck = await db.query(`
+    select conname from pg_constraint where conrelid = 'activity_routines'::regclass and contype = 'u';
+  `);
+  record('Milestone 2: activity_routines has a UNIQUE constraint (organization/activity/session/exercise)', uniqueConstraintCheck.rows.length === 1);
+
+  const fkCheck = await db.query(`
+    select count(*) from pg_constraint where conrelid = 'activity_routines'::regclass and contype = 'f';
+  `);
+  record('Milestone 2: activity_routines has exactly 2 foreign keys (organization_id, exercise_id)', Number(fkCheck.rows[0].count) === 2);
+
+  // Supabase grants broad table privileges to anon/authenticated by default
+  // for any new table — replicated here the same way the top-of-file
+  // baseline grant was, so RLS (not a missing GRANT) is what's under test.
+  await db.exec(`grant select, insert, update, delete on activity_routines to anon, authenticated;`);
+
+  // Default-deny checkpoint: 0004 alone enables RLS with ZERO policies, so
+  // even legitimate org A staff see nothing yet — this is the safe
+  // intermediate state the investigation's rollout plan calls for.
+  await asUser(db, coachId);
+  await expectRows(db, `select * from activity_routines;`, 0, 'Milestone 2 pre-0005: even org A staff sees zero rows (RLS enabled, no policy yet — default-deny)');
+  await asAdmin(db);
+
+  const m0005 = readFileSync(join(migrationsDir, '0005_milestone2_activity_routines_rls_rpc.sql'), 'utf8');
+  await expectSucceeds(db, m0005, '0005_milestone2_activity_routines_rls_rpc.sql applies cleanly');
+  await expectSucceeds(db, m0005, '0005_milestone2_activity_routines_rls_rpc.sql is safely RE-RUNNABLE (applied a second time, no errors)');
+
+  // has_function_privilege() per-role, not a row count against
+  // information_schema.routine_privileges — that view also lists the
+  // function's OWNER as an implicit grantee (ownership carries all
+  // privileges regardless of any explicit GRANT), so counting rows is not
+  // a valid way to assert "only anon can execute this".
+  const rpcSig = `get_athlete_routines(text, activity_type[], exercise_category)`;
+  const rpcAnonExec = await db.query(`select has_function_privilege('anon', '${rpcSig}', 'EXECUTE') as v;`);
+  const rpcAuthExec = await db.query(`select has_function_privilege('authenticated', '${rpcSig}', 'EXECUTE') as v;`);
+  const rpcPublicExec = await db.query(`select has_function_privilege('public', '${rpcSig}', 'EXECUTE') as v;`);
+  record(
+    'Milestone 2: get_athlete_routines EXECUTE — anon HAS it, authenticated does NOT, PUBLIC does NOT',
+    rpcAnonExec.rows[0].v === true && rpcAuthExec.rows[0].v === false && rpcPublicExec.rows[0].v === false
+  );
+
+  // ── Seed routine rows as real staff, through RLS (not as asAdmin) ───────
+  await asUser(db, coachId); // org A
+  const routineA1 = await db.query(`
+    insert into activity_routines (organization_id, activity, session_type, exercise_id, sort_order)
+    values ('${orgA}', 'pitching', 'strength', '${exA.rows[0].id}', 0) returning id;
+  `);
+  record('Milestone 2: org A staff (coach) can insert a routine into their own org', routineA1.rows.length === 1);
+
+  await expectThrows(
+    db,
+    `insert into activity_routines (organization_id, activity, session_type, exercise_id, sort_order) values ('${orgB}', 'pitching', 'strength', '${exB.rows[0].id}', 0);`,
+    'Milestone 2: org A staff CANNOT insert a routine into org B (RLS WITH CHECK blocks it)',
+    undefined
+  );
+
+  await expectRows(db, `select * from activity_routines;`, 1, 'Milestone 2: org A staff sees exactly their own org\'s routine (1 row)');
+
+  await expectThrows(
+    db,
+    `insert into activity_routines (organization_id, activity, session_type, exercise_id, sort_order) values ('${orgA}', 'pitching', 'strength', '${exA.rows[0].id}', 1);`,
+    'Milestone 2: duplicate (organization, activity, session_type, exercise_id) mapping is rejected',
+    'duplicate key'
+  );
+
+  // ── Cross-organization exercise integrity guard (0004's trigger) ───────
+  // Fresh 'fielding' activity slots, unused by any prior insert in this
+  // run, so these are isolated from the unique-constraint tests above.
+  //
+  // A) Org A routine + Org A (private) exercise -> allowed.
+  const guardA = await db.query(`
+    insert into activity_routines (organization_id, activity, session_type, exercise_id, sort_order)
+    values ('${orgA}', 'fielding', 'recovery', '${exA.rows[0].id}', 0) returning id;
+  `);
+  record('Milestone 2 integrity guard (A): org A routine + org A\'s own exercise is allowed', guardA.rows.length === 1);
+
+  // B) Org A routine + a shared/global exercise (organization_id IS NULL) -> allowed.
+  const guardB = await db.query(`
+    insert into activity_routines (organization_id, activity, session_type, exercise_id, sort_order)
+    values ('${orgA}', 'fielding', 'strength', '${exGlobal.rows[0].id}', 0) returning id;
+  `);
+  record('Milestone 2 integrity guard (B): org A routine + a shared/global exercise is allowed', guardB.rows.length === 1);
+
+  // C) Org A routine + Org B's PRIVATE exercise -> rejected by the trigger
+  // (not merely by RLS — organization_id here legitimately belongs to the
+  // inserting org A staff member; only the exercise's own org differs).
+  await expectThrows(
+    db,
+    `insert into activity_routines (organization_id, activity, session_type, exercise_id, sort_order) values ('${orgA}', 'fielding', 'injury_prevention', '${exB.rows[0].id}', 0);`,
+    'Milestone 2 integrity guard (C): org A routine referencing org B\'s private exercise is REJECTED (trigger-enforced, not just RLS)',
+    'does not match'
+  );
+
+  await asUser(db, orgBAdminId); // org B
+  const routineB1 = await db.query(`
+    insert into activity_routines (organization_id, activity, session_type, exercise_id, sort_order)
+    values ('${orgB}', 'pitching', 'strength', '${exB.rows[0].id}', 0) returning id;
+  `);
+  record('Milestone 2: org B staff can insert their own org\'s routine', routineB1.rows.length === 1);
+
+  // Same (shared/global) exercise, mapped into the SAME activity/session
+  // slot by BOTH organizations — must succeed for both, since
+  // organization_id is part of the unique constraint.
+  await asUser(db, coachId);
+  const routineAGlobal = await db.query(`
+    insert into activity_routines (organization_id, activity, session_type, exercise_id, sort_order)
+    values ('${orgA}', 'catching', 'mobility', '${exGlobal.rows[0].id}', 0) returning id;
+  `);
+  await asUser(db, orgBAdminId);
+  const routineBGlobal = await db.query(`
+    insert into activity_routines (organization_id, activity, session_type, exercise_id, sort_order)
+    values ('${orgB}', 'catching', 'mobility', '${exGlobal.rows[0].id}', 0) returning id;
+  `);
+  record(
+    'Milestone 2: two different organizations may map the SAME (shared) exercise to the SAME activity/session slot',
+    routineAGlobal.rows.length === 1 && routineBGlobal.rows.length === 1
+  );
+
+  // ── Cross-org read isolation (direct table access, as staff) ───────────
+  await asUser(db, coachId);
+  await expectRows(db, `select * from activity_routines where organization_id = '${orgB}';`, 0, 'Milestone 2: org A staff cannot see org B\'s routines');
+  await asUser(db, orgBAdminId);
+  await expectRows(db, `select * from activity_routines where organization_id = '${orgA}';`, 0, 'Milestone 2: org B staff cannot see org A\'s routines');
+
+  await asUser(db, ownerId);
+  // 6 rows by this point: routineA1, routineAGlobal, guardA, guardB (org A)
+  // + routineB1, routineBGlobal (org B).
+  await expectRows(db, `select * from activity_routines;`, 6, 'Milestone 2: Super User sees routines across BOTH organizations');
+
+  // ── Anonymous direct table access: fully denied, no anon policy exists ──
+  await asAnon(db);
+  await expectRows(db, `select * from activity_routines;`, 0, 'Milestone 2: anonymous direct SELECT on activity_routines returns zero rows (no anon table policy)');
+
+  // ── Athlete RPC: the ONLY sanctioned anon path to this data ─────────────
+  const rpcValid = await db.query(`select * from get_athlete_routines('AAA111', array['pitching']::activity_type[], 'strength');`);
+  record(
+    'Milestone 2 RPC: valid athlete code (org A) retrieves exactly its own org\'s matching routine',
+    rpcValid.rows.length === 1 && rpcValid.rows[0].ex_id === exA.rows[0].id
+  );
+
+  const rpcOrgB = await db.query(`select * from get_athlete_routines('BBB111', array['pitching']::activity_type[], 'strength');`);
+  record(
+    'Milestone 2 RPC: athlete B (org B) retrieves org B\'s routine, not org A\'s',
+    rpcOrgB.rows.length === 1 && rpcOrgB.rows[0].ex_id === exB.rows[0].id
+  );
+
+  const rpcInvalidCode = await db.query(`select * from get_athlete_routines('NOPECODE', array['pitching']::activity_type[], 'strength');`);
+  record('Milestone 2 RPC: invalid athlete code returns zero rows (no error, no info leak)', rpcInvalidCode.rows.length === 0);
+
+  // The decisive cross-org isolation proof: BOTH orgs populated the exact
+  // same activity/session slot with the exact same (shared) exercise —
+  // athlete A must see ONLY org A's row, never org B's, even though the
+  // exercise_id is identical.
+  const rpcCrossOrgSameSlot = await db.query(`select * from get_athlete_routines('AAA111', array['catching']::activity_type[], 'mobility');`);
+  record(
+    'Milestone 2 RPC: athlete A sees only org A\'s row for a slot BOTH orgs populated with the identical exercise (org derived server-side, never leaks org B\'s row)',
+    rpcCrossOrgSameSlot.rows.length === 1 && rpcCrossOrgSameSlot.rows[0].id === routineAGlobal.rows[0].id
+  );
+
+  const rpcDormant = await db.query(`select * from get_athlete_routines('WRONGCODE', array['pitching']::activity_type[], 'strength');`);
+  record('Milestone 2 RPC: an unrecognized code (not just a malformed one) also returns zero rows, no error', rpcDormant.rows.length === 0);
+
+  // D) Defense-in-depth: even if a corrupt row somehow existed (bypassing
+  // the 0004 trigger entirely — simulated here by disabling it, since a
+  // trigger cannot be bypassed any other way, not even by a superuser),
+  // get_athlete_routines must still never surface an org-B-owned exercise
+  // to an org-A athlete. This is what the RPC's own
+  // "e.organization_id = v_org_id or e.organization_id is null" filter
+  // (independent of the trigger) exists to guarantee.
+  await asAdmin(db);
+  await db.exec(`alter table activity_routines disable trigger activity_routines_exercise_org_guard;`);
+  const corruptRoutine = await db.query(`
+    insert into activity_routines (organization_id, activity, session_type, exercise_id, sort_order)
+    values ('${orgA}', 'hitting', 'recovery', '${exB.rows[0].id}', 0) returning id;
+  `);
+  await db.exec(`alter table activity_routines enable trigger activity_routines_exercise_org_guard;`);
+  record('Milestone 2 (D) setup: a corrupt org A routine / org B exercise row could only be created with the guard trigger disabled', corruptRoutine.rows.length === 1);
+
+  const rpcCorrupt = await db.query(`select * from get_athlete_routines('AAA111', array['hitting']::activity_type[], 'recovery');`);
+  record(
+    'Milestone 2 RPC (D): even with a corrupt cross-org row present in the table, get_athlete_routines never returns an org-B-owned exercise to an org-A athlete',
+    rpcCorrupt.rows.length === 0
+  );
+
+  await asAdmin(db);
+
+  // ── 21) EXERCISE ORGANIZATION ISOLATION — remove the anon SELECT
+  // policy on exercises (0006). The original justification for that
+  // policy (the pre-Milestone-2 athlete wizard's direct
+  // `exercise:exercises(*)` embed) no longer exists — get_athlete_routines
+  // (SECURITY DEFINER) already serves every exercise field the athlete UI
+  // needs, bypassing RLS entirely. This section proves BOTH halves of that
+  // claim: direct anon table access is now denied, AND the athlete RPC
+  // path is completely unaffected.
+  const m0006 = readFileSync(join(migrationsDir, '0006_exercise_anon_policy_removal.sql'), 'utf8');
+  await expectSucceeds(db, m0006, '0006_exercise_anon_policy_removal.sql applies cleanly');
+  await expectSucceeds(db, m0006, '0006_exercise_anon_policy_removal.sql is safely RE-RUNNABLE (applied a second time, no errors)');
+
+  const exercisesPolicyCheck = await db.query(`select policyname from pg_policies where tablename = 'exercises';`);
+  record(
+    '0006: exercises now has exactly one policy left ("Staff org access - exercises") — the anon policy is gone, the staff policy is untouched',
+    exercisesPolicyCheck.rows.length === 1 && exercisesPolicyCheck.rows[0].policyname === 'Staff org access - exercises'
+  );
+
+  // Staff access is completely unaffected by 0006 (same policy, never touched).
+  await asUser(db, coachId);
+  await expectRows(db, `select * from exercises;`, 10, '0006: org A staff still sees org A + global exercises exactly as before (staff policy untouched)');
+  await asAdmin(db);
+
+  // The actual regression guard: direct anonymous table access now fails.
+  await asAnon(db);
+  await expectRows(db, `select * from exercises;`, 0, '0006: anonymous direct SELECT on exercises now returns zero rows (the PIN-bridge policy this test used to require is gone)');
+  await expectThrows(db, `insert into exercises (name, category) values ('hack', 'mobility');`, '0006: anonymous exercises INSERT is still denied (unchanged — there was never an anon write policy)', undefined);
+
+  // The decisive proof this removal is safe: the athlete-facing RPC path
+  // is completely unaffected, end to end.
+  const execCheckAfter0006 = await db.query(`select has_function_privilege('anon', 'get_athlete_routines(text, activity_type[], exercise_category)', 'EXECUTE') as v;`);
+  record('0006: anon can still execute get_athlete_routines() (unchanged — this RPC never depended on the table policy)', execCheckAfter0006.rows[0].v === true);
+
+  const rpcAfter0006 = await db.query(`select * from get_athlete_routines('AAA111', array['pitching']::activity_type[], 'strength');`);
+  record(
+    '0006: a valid athlete access code still receives its legitimate routine after the anon table policy is removed',
+    rpcAfter0006.rows.length === 1 && rpcAfter0006.rows[0].ex_id === exA.rows[0].id
+  );
+  record(
+    '0006: the returned routine still carries the full exercise information the athlete UI renders (name, sets, reps, duration, video_url, description)',
+    rpcAfter0006.rows[0].ex_name === 'Academy A Drill' &&
+    'ex_sets' in rpcAfter0006.rows[0] && 'ex_reps' in rpcAfter0006.rows[0] &&
+    'ex_duration_sec' in rpcAfter0006.rows[0] && 'ex_video_url' in rpcAfter0006.rows[0] &&
+    'ex_description' in rpcAfter0006.rows[0]
+  );
+
+  await asAdmin(db);
 
   await db.close();
 
