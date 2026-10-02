@@ -31,6 +31,17 @@
 // same org A / org B / athlete fixtures already built up earlier in this
 // file rather than duplicating them.
 //
+// ADDED — a true fresh-database sequence (section 22 below, its own
+// isolated PGlite instance): applies ONLY the active migrations, in exact
+// order, 0000 -> 0001 -> 0003 -> 0004 -> 0005 -> 0006. It never loads
+// schema.sql and never executes the archived 0002 (one-time production
+// backfill, now under supabase/migrations_archive/, which asserts
+// production-specific preconditions that would never hold on an empty
+// database). This is the scenario that matters for provisioning any new
+// automated database (local dev, CI); the schema.sql-first flow above it
+// remains, unchanged, as the separate historical-deployment scenario it
+// always was — neither replaces the other.
+//
 // Usage: node supabase/migrations/checks/run_migration_tests.mjs
 //   (or: npm run test:db)
 //
@@ -39,13 +50,14 @@
 
 import { PGlite } from '@electric-sql/pglite';
 import { uuid_ossp } from '@electric-sql/pglite/contrib/uuid_ossp';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(__dirname, '..');
 const schemaPath = join(__dirname, '..', '..', 'schema.sql');
+const archiveDir = join(__dirname, '..', '..', 'migrations_archive');
 
 const results = [];
 
@@ -218,7 +230,11 @@ async function main() {
   // ── 2) Migration 0002 — executed as the ACTUAL file content, with only
   //    the documented placeholder substituted, proving the real
   //    instructions work (not a re-typed equivalent). ────────────────────
-  const m0002Raw = readFileSync(join(migrationsDir, '0002_milestone1_backfill.sql'), 'utf8');
+  // 0002 now lives in supabase/migrations_archive/ (archived — one-time
+  // production backfill, no longer part of the active migration chain).
+  // Read from its new location; this historical test still exercises the
+  // real file content, same as before the move.
+  const m0002Raw = readFileSync(join(archiveDir, '0002_milestone1_backfill.sql'), 'utf8');
 
   // 2a. Abort case: placeholder never replaced.
   await expectThrows(db, m0002Raw, '0002 aborts if the email placeholder was never replaced', 'must be set to a valid email address');
@@ -1015,6 +1031,103 @@ async function main() {
     record('Rollback-0002: 0001 schema (staff_profiles table) is untouched, only its DATA was removed', schemaStillPresent.rows[0].t !== null);
 
     await rdb2.close();
+  }
+
+  // ── 22) TRUE FRESH-DATABASE MIGRATION SEQUENCE — the release-blocker
+  // regression guard this section exists for. Proves the ACTIVE migration
+  // chain alone — 0000 -> 0001 -> 0003 -> 0004 -> 0005 -> 0006 — can
+  // construct the entire schema from a completely empty database, with
+  // NO reliance on supabase/schema.sql (historical reference only, see
+  // CLAUDE.md) and NO execution of the archived one-time production
+  // backfill (0002, now under supabase/migrations_archive/, which asserts
+  // production-specific preconditions that would never hold on a fresh
+  // database and is correctly excluded from this sequence). This is a
+  // DIFFERENT scenario from the schema.sql-first flow exercised by the
+  // rest of this file above — both are kept; neither replaces the other.
+  {
+    const archivedPath = join(archiveDir, '0002_milestone1_backfill.sql');
+    const stillInActiveMigrations = existsSync(join(migrationsDir, '0002_milestone1_backfill.sql'));
+    record(
+      'Fresh-DB regression guard: 0002_milestone1_backfill.sql is NOT present in supabase/migrations/ (archived, not active)',
+      !stillInActiveMigrations
+    );
+    record(
+      'Fresh-DB regression guard: the archived backfill file exists at supabase/migrations_archive/0002_milestone1_backfill.sql',
+      existsSync(archivedPath)
+    );
+
+    const fdb = new PGlite({ extensions: { uuid_ossp } });
+    await fdb.exec(`create extension if not exists "uuid-ossp";`);
+    await fdb.exec(`create role anon nologin; create role authenticated nologin;`);
+    await fdb.exec(`create schema auth;`);
+    await fdb.exec(`create table auth.users (id uuid primary key default uuid_generate_v4(), email text, raw_user_meta_data jsonb, last_sign_in_at timestamptz);`);
+    await fdb.exec(`create or replace function auth.uid() returns uuid language sql stable as $$
+      select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
+    $$;`);
+
+    const freshM0000 = readFileSync(join(migrationsDir, '0000_baseline_schema.sql'), 'utf8');
+    const freshM0001 = readFileSync(join(migrationsDir, '0001_milestone1_schema.sql'), 'utf8');
+    const freshM0003 = readFileSync(join(migrationsDir, '0003_milestone1_rls.sql'), 'utf8');
+    const freshM0004 = readFileSync(join(migrationsDir, '0004_milestone2_activity_routines_schema.sql'), 'utf8');
+    const freshM0005 = readFileSync(join(migrationsDir, '0005_milestone2_activity_routines_rls_rpc.sql'), 'utf8');
+    const freshM0006 = readFileSync(join(migrationsDir, '0006_exercise_anon_policy_removal.sql'), 'utf8');
+
+    await expectSucceeds(fdb, freshM0000, 'Fresh DB: 0000_baseline_schema.sql applies cleanly against a completely empty database');
+    await expectSucceeds(fdb, freshM0001, 'Fresh DB: 0001_milestone1_schema.sql applies cleanly on top of 0000 alone (no schema.sql, no 0002)');
+    await expectSucceeds(fdb, freshM0003, 'Fresh DB: 0003_milestone1_rls.sql applies cleanly with 0002 skipped entirely');
+    await expectSucceeds(fdb, freshM0004, 'Fresh DB: 0004_milestone2_activity_routines_schema.sql applies cleanly');
+    await expectSucceeds(fdb, freshM0005, 'Fresh DB: 0005_milestone2_activity_routines_rls_rpc.sql applies cleanly');
+    await expectSucceeds(fdb, freshM0006, 'Fresh DB: 0006_exercise_anon_policy_removal.sql applies cleanly');
+
+    // ── Post-sequence verification: critical baseline tables/types exist ──
+    const freshTables = await fdb.query(`
+      select table_name from information_schema.tables
+      where table_schema = 'public' and table_name in
+        ('athletes','exercises','weekly_plans','assigned_exercises',
+         'organizations','staff_profiles','platform_admins','audit_events',
+         'athlete_access_attempts','activity_routines');
+    `);
+    const expectedFreshTables = [
+      'athletes','exercises','weekly_plans','assigned_exercises',
+      'organizations','staff_profiles','platform_admins','audit_events',
+      'athlete_access_attempts','activity_routines',
+    ].sort();
+    record(
+      'Fresh DB: all 10 expected tables exist after the full active sequence',
+      JSON.stringify(freshTables.rows.map(r => r.table_name).sort()) === JSON.stringify(expectedFreshTables),
+      `got: ${freshTables.rows.map(r => r.table_name).sort().join(', ')}`
+    );
+
+    const freshTypes = await fdb.query(`
+      select typname from pg_type where typname in
+        ('exercise_category','day_of_week','staff_role','activity_type');
+    `);
+    record(
+      'Fresh DB: all 4 expected enum types exist after the full active sequence',
+      freshTypes.rows.length === 4,
+      `got: ${freshTypes.rows.map(r => r.typname).join(', ')}`
+    );
+
+    const freshFunctions = await fdb.query(`
+      select proname from pg_proc where pronamespace = 'public'::regnamespace and proname in
+        ('set_updated_at','current_org_id','is_super_user','is_org_administrator',
+         'log_audit_event','get_athlete_by_code','update_athlete_photo_by_code',
+         'get_athlete_routines','enforce_activity_routine_exercise_org');
+    `);
+    record(
+      'Fresh DB: all 9 expected functions/RPCs exist after the full active sequence',
+      freshFunctions.rows.length === 9,
+      `got: ${freshFunctions.rows.map(r => r.proname).join(', ')}`
+    );
+
+    const freshRlsCheck = await fdb.query(`
+      select relname from pg_class
+      where relname in ('athletes','exercises','weekly_plans','assigned_exercises','activity_routines')
+        and relrowsecurity = true;
+    `);
+    record('Fresh DB: RLS is enabled on all 5 user-data tables', freshRlsCheck.rows.length === 5);
+
+    await fdb.close();
   }
 
   // ── Summary ───────────────────────────────────────────────────────────────

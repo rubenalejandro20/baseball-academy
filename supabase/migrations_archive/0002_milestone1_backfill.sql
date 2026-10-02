@@ -1,4 +1,18 @@
 -- ============================================================
+-- ARCHIVED — one-time production backfill, already applied and verified
+-- (see MILESTONE1_STATUS.md). Moved out of supabase/migrations/ into
+-- supabase/migrations_archive/ so it no longer participates in the
+-- active, automated fresh-database migration sequence
+-- (0000 -> 0001 -> 0003 -> 0004 -> 0005 -> 0006). It is NOT seed data and
+-- must NOT be treated as seed.sql: it hardcodes production-specific row
+-- counts and a specific account email, asserts a populated-database
+-- precondition, and is designed to abort (not no-op) if run against an
+-- empty or differently-shaped database. Kept here, unmodified below this
+-- header, purely as the historical record of what was actually run
+-- against production for Milestone 1's org/staff bootstrap.
+-- ============================================================
+
+-- ============================================================
 -- Milestone 1 — Data backfill (production-safe, final)
 -- ============================================================
 -- Run AFTER 0001_milestone1_schema.sql has been applied and verified.

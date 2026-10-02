@@ -12,8 +12,9 @@ Last verified: 2026-09-29.
 
 | File / Section | Status |
 |---|---|
+| `0000_baseline_schema.sql` | **N/A to production** — repo-side-only addition, never run against production. It exists purely as the canonical starting point for a FRESH, empty database (local dev, CI); production already has this baseline's objects from the original `schema.sql` apply, long before this file existed. |
 | `0001_milestone1_schema.sql` | **Applied** (full file) |
-| `0002_milestone1_backfill.sql` | **Applied** (one-shot bootstrap; running it again is expected to abort, not no-op — see the file's own preconditions) |
+| `0002_milestone1_backfill.sql` | **Applied** (one-shot bootstrap; running it again is expected to abort, not no-op — see the file's own preconditions). Repo location note: this file has since been moved to `supabase/migrations_archive/` (it no longer participates in the active fresh-database migration chain), but that move is a repo-organization change only — it does not change, and does not need to re-verify, what already ran against production. |
 | `0003_milestone1_rls.sql` — Section 1 (`athletes`) | **Applied and verified** |
 | `0003_milestone1_rls.sql` — Section 2 (`exercises`) | **Applied and verified** |
 | `0003_milestone1_rls.sql` — Section 3 (`weekly_plans`) | **Applied and verified** |
