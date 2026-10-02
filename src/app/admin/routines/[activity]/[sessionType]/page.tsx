@@ -23,19 +23,26 @@ export default function RoutineSlotPage() {
   const [routines, setRoutines]   = useState<ActivityRoutine[]>([]);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [loading, setLoading]     = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving]       = useState(false);
 
   const loadRoutines = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     const supabase = createClient();
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('activity_routines')
       .select('*, exercise:exercises(*)')
       .eq('activity', act)
       .eq('session_type', sess)
       .order('sort_order');
-    setRoutines(data ?? []);
+    if (error) {
+      setLoadError(true);
+      setRoutines([]);
+    } else {
+      setRoutines(data ?? []);
+    }
     setLoading(false);
   }, [act, sess]);
 
@@ -115,6 +122,11 @@ export default function RoutineSlotPage() {
             {[1, 2, 3].map(i => (
               <div key={i} className="h-16 bg-white/5 rounded-lg animate-pulse" />
             ))}
+          </div>
+        ) : loadError ? (
+          <div className="text-center py-12">
+            <p className="text-red-400 text-sm">Couldn't load this routine.</p>
+            <p className="text-slate-600 text-xs mt-1">Try refreshing the page.</p>
           </div>
         ) : routines.length === 0 ? (
           <div className="text-center py-12">

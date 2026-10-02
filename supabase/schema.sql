@@ -1,6 +1,24 @@
 -- ============================================================
 -- Baseball Academy – Supabase Schema
--- Run this in your Supabase SQL Editor (Dashboard → SQL Editor)
+-- ============================================================
+-- ⚠️ HISTORICAL BASELINE — DOES NOT MATCH THE CURRENT PRODUCTION DATABASE.
+-- This file documents the schema as it existed BEFORE Milestone 1. Do NOT
+-- run this file by itself against the existing production database — it
+-- would attempt to recreate tables/policies that already exist in a
+-- different (post-Milestone-1) shape and does not include the
+-- organizations/staff_profiles/platform_admins/audit_events/
+-- athlete_access_attempts tables or the Milestone 1 RLS policies that are
+-- already live in production.
+--
+-- This file is only appropriate for provisioning a brand-new, empty
+-- Supabase project from scratch (e.g. local dev, a fresh environment) as
+-- STEP ONE, followed immediately by the migrations in supabase/migrations/
+-- in order (0001 → 0002 → 0003). It is never a substitute for those
+-- migrations, and never a "re-sync" step against a database that already
+-- has Milestone 1 applied.
+--
+-- For the actual current production schema and rollout status, see
+-- MILESTONE1_STATUS.md at the repository root and section 9 below.
 -- ============================================================
 
 -- Enable UUID extension

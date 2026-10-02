@@ -168,6 +168,11 @@ export type ActivityType = 'pitching' | 'catching' | 'hitting' | 'fielding';
 
 export interface ActivityRoutine {
   id: string;
+  // Present on admin-side rows (a direct, RLS-scoped table read/insert).
+  // Absent on athlete-side rows (constructed from get_athlete_routines(),
+  // which never returns or accepts an organization_id from the caller —
+  // see src/app/athlete/[code]/page.tsx).
+  organization_id?: string;
   activity: ActivityType;
   session_type: ExerciseCategory;
   exercise_id: string;
