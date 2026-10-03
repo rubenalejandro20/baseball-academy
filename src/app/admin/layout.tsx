@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
 import { getStaffContext, type StaffContextResult } from '@/lib/auth/getStaffContext';
 import { AppShell, type NavItem } from '@/components/shell/AppShell';
+import { CheckingScreen, NotLinkedScreen, ForbiddenScreen } from '@/components/shell/StaffGuardScreens';
 import {
   LayoutDashboard, Users, Dumbbell, Layers, Activity, QrCode
 } from 'lucide-react';
@@ -17,7 +18,7 @@ const NAV: NavItem[] = [
   { href: '/admin/qrcodes',   label: 'QR Codes',         icon: QrCode },
 ];
 
-type GuardState = 'checking' | 'authorized' | 'not_linked';
+type GuardState = 'checking' | 'authorized' | 'not_linked' | 'forbidden';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router   = useRouter();
@@ -39,6 +40,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         router.replace('/admin/login');
       } else if (result.status === 'not_linked') {
         setState('not_linked');
+      } else if (result.role === 'coach' && !result.isSuperUser) {
+        // Milestone 4: a plain coach is denied the Physician/Trainer
+        // portal's UX, mirroring the Coach Portal denying a plain
+        // physician. RLS (0008) is the real security boundary — every
+        // query on this portal's pages would already return zero rows
+        // for a coach account — this is only the matching explained
+        // denial screen instead of a confusing, data-less admin UI.
+        setState('forbidden');
       } else {
         setContext(result);
         setState('authorized');
@@ -54,32 +63,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     router.replace('/admin/login');
   }
 
-  if (state === 'checking') return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0B1426]">
-      <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
-    </div>
-  );
+  if (state === 'checking') return <CheckingScreen />;
 
   // A valid Supabase session exists, but no active staff_profiles row was
   // found for it. Surfaced explicitly rather than silently bounced to
   // /admin/login, which would look identical to a wrong password and hide
   // the real cause (e.g. the Milestone 1 backfill hasn't run for this
   // account, or the account was deactivated).
-  if (state === 'not_linked') return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0B1426] px-4">
-      <div className="card p-8 max-w-sm text-center">
-        <h1 className="font-display text-xl font-bold text-white tracking-wide mb-2">
-          ACCOUNT NOT LINKED
-        </h1>
-        <p className="text-sm text-slate-400">
-          Your login was successful, but this account isn&apos;t linked to an academy yet.
-          Contact your administrator or platform support.
-        </p>
-        <button onClick={handleLogout} className="btn-secondary mt-6 mx-auto">
-          Sign out
-        </button>
-      </div>
-    </div>
+  if (state === 'not_linked') return <NotLinkedScreen onLogout={handleLogout} />;
+
+  if (state === 'forbidden') return (
+    <ForbiddenScreen
+      onLogout={handleLogout}
+      message="This account is registered as a coach. The Physician/Trainer portal isn't available to coach accounts — use the Coach Portal instead."
+    />
   );
 
   return (

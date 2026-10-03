@@ -33,7 +33,8 @@
 //
 // ADDED — a true fresh-database sequence (section 22 below, its own
 // isolated PGlite instance): applies ONLY the active migrations, in exact
-// order, 0000 -> 0001 -> 0003 -> 0004 -> 0005 -> 0006. It never loads
+// order, 0000 -> 0001 -> 0003 -> 0004 -> 0005 -> 0006 -> 0007 -> 0008
+// (the last two added by Milestone 4). It never loads
 // schema.sql and never executes the archived 0002 (one-time production
 // backfill, now under supabase/migrations_archive/, which asserts
 // production-specific preconditions that would never hold on an empty
@@ -887,6 +888,119 @@ async function main() {
 
   await asAdmin(db);
 
+  // ── MILESTONE 4) Coach/physician role RPCs (0007) + RLS tightening on
+  // the physician/trainer-domain tables (0008). Establishes a REAL
+  // database-level distinction between coach and physician/trainer
+  // access, closing the gap flagged since Milestone 1 ("Milestone 1 only
+  // distinguishes administrator or not"). Captures each role's access on
+  // all 5 affected tables BEFORE applying 0007/0008, then re-checks the
+  // SAME queries after: administrator/physician/Super User must see
+  // IDENTICAL results (non-regression); a plain coach must drop to zero
+  // on every one of them, for both reads AND writes.
+  async function countAs(uid, table) {
+    await asUser(db, uid);
+    const res = await db.query(`select count(*) from ${table};`);
+    await asAdmin(db);
+    return Number(res.rows[0].count);
+  }
+
+  // plainAdminId was deactivated by the earlier last-administrator-guard
+  // test (section 14) and never reactivated there (only ownerId was
+  // restored) — harmless until now, since nothing between that section
+  // and this one touches plainAdminId again. This section needs it back
+  // as a genuinely ACTIVE administrator fixture, so restore it here.
+  await db.exec(`update staff_profiles set is_active = true where auth_user_id = '${plainAdminId}';`);
+
+  const PHYSICIAN_DOMAIN_TABLES = ['athletes', 'exercises', 'weekly_plans', 'assigned_exercises', 'activity_routines'];
+
+  const beforeAdmin = {};
+  const beforePhysician = {};
+  const beforeCoach = {};
+  for (const t of PHYSICIAN_DOMAIN_TABLES) {
+    beforeAdmin[t] = await countAs(plainAdminId, t);
+    beforePhysician[t] = await countAs(physicianId, t);
+    beforeCoach[t] = await countAs(coachId, t);
+  }
+  record(
+    'PRE-0008: a plain coach currently has the SAME access as an administrator on every physician/trainer table (confirms the exact gap Milestone 4 closes)',
+    PHYSICIAN_DOMAIN_TABLES.every(t => beforeCoach[t] === beforeAdmin[t] && beforeCoach[t] > 0)
+  );
+
+  const m0007 = readFileSync(join(migrationsDir, '0007_coach_physician_role_rpcs.sql'), 'utf8');
+  await expectSucceeds(db, m0007, '0007_coach_physician_role_rpcs.sql applies cleanly');
+  await expectSucceeds(db, m0007, '0007_coach_physician_role_rpcs.sql is safely RE-RUNNABLE (applied a second time, no errors)');
+
+  // RPC-level correctness: each RPC is a STRICT single-role check — an
+  // administrator is NOT also flagged as a coach or physician (that
+  // composition happens in 0008's policy text, not inside these functions).
+  await asUser(db, coachId);
+  const coachFlags = await db.query(`select is_org_coach() as coach, is_org_physician() as physician;`);
+  record('0007: is_org_coach() is true and is_org_physician() is false for a coach account',
+    coachFlags.rows[0].coach === true && coachFlags.rows[0].physician === false);
+
+  await asUser(db, physicianId);
+  const physicianFlags = await db.query(`select is_org_coach() as coach, is_org_physician() as physician;`);
+  record('0007: is_org_physician() is true and is_org_coach() is false for a physician account',
+    physicianFlags.rows[0].physician === true && physicianFlags.rows[0].coach === false);
+
+  await asUser(db, plainAdminId);
+  const adminFlags = await db.query(`select is_org_coach() as coach, is_org_physician() as physician;`);
+  record('0007: is_org_coach() and is_org_physician() are BOTH false for an administrator (strict single-role checks, not administrator-inclusive)',
+    adminFlags.rows[0].coach === false && adminFlags.rows[0].physician === false);
+  await asAdmin(db);
+
+  const m0008 = readFileSync(join(migrationsDir, '0008_coach_physician_rls_cutover.sql'), 'utf8');
+  await expectSucceeds(db, m0008, '0008_coach_physician_rls_cutover.sql applies cleanly');
+  await expectSucceeds(db, m0008, '0008_coach_physician_rls_cutover.sql is safely RE-RUNNABLE (applied a second time, no errors)');
+
+  // Non-regression: administrator and physician see IDENTICAL results
+  // after 0008 as they did before it, on every affected table.
+  for (const t of PHYSICIAN_DOMAIN_TABLES) {
+    const afterAdmin = await countAs(plainAdminId, t);
+    record(`POST-0008: administrator's ${t} access is unchanged`, afterAdmin === beforeAdmin[t], `before=${beforeAdmin[t]}, after=${afterAdmin}`);
+    const afterPhysician = await countAs(physicianId, t);
+    record(`POST-0008: physician's ${t} access is unchanged`, afterPhysician === beforePhysician[t], `before=${beforePhysician[t]}, after=${afterPhysician}`);
+  }
+
+  // Super User (ownerId) non-regression — still sees across both orgs.
+  const superUserAfter = await countAs(ownerId, 'athletes');
+  record('POST-0008: Super User athlete visibility is unchanged (still sees across both organizations)', superUserAfter === 5);
+
+  // The actual tightening: a plain coach now gets ZERO rows on every
+  // physician/trainer-domain table.
+  for (const t of PHYSICIAN_DOMAIN_TABLES) {
+    const afterCoach = await countAs(coachId, t);
+    record(`POST-0008: plain coach's ${t} access drops to ZERO (was ${beforeCoach[t]} before 0008)`, afterCoach === 0 && beforeCoach[t] > 0);
+  }
+
+  // Explicit negative WRITE tests — WITH CHECK (insert) and USING (update)
+  // are both tightened, not just the read side.
+  await asUser(db, coachId);
+  await expectThrows(
+    db,
+    `insert into athletes (full_name, access_code, organization_id) values ('Coach Inserted', 'COACHX', '${orgA}');`,
+    'POST-0008: a plain coach cannot INSERT into athletes (WITH CHECK rejects it, raises an error)',
+    undefined
+  );
+  await db.exec(`update exercises set name = 'Coach Edited' where id = '${exA.rows[0].id}';`); // RLS USING silently filters to 0 matching rows, not an error
+  await asAdmin(db);
+  const exAAfterCoachAttempt = await db.query(`select name from exercises where id = '${exA.rows[0].id}';`);
+  record(
+    "POST-0008: a plain coach's UPDATE on an org exercise affects zero rows (RLS USING-filtered, not an error)",
+    exAAfterCoachAttempt.rows[0]?.name === 'Academy A Drill'
+  );
+
+  // Goal: the athlete-facing experience and Activity Routines are
+  // completely unaffected, since get_athlete_routines() is SECURITY
+  // DEFINER and never depended on these table-level policies.
+  const rpcAfter0008 = await db.query(`select * from get_athlete_routines('AAA111', array['pitching']::activity_type[], 'strength');`);
+  record(
+    'POST-0008: a valid athlete access code still receives its legitimate routine (Activity Routines / athlete experience unaffected by the coach/physician RLS cutover)',
+    rpcAfter0008.rows.length === 1 && rpcAfter0008.rows[0].ex_id === exA.rows[0].id
+  );
+
+  await asAdmin(db);
+
   await db.close();
 
   // ── 18) Emergency rollback for 0001 — fresh, isolated instance ──────────
@@ -1035,8 +1149,9 @@ async function main() {
 
   // ── 22) TRUE FRESH-DATABASE MIGRATION SEQUENCE — the release-blocker
   // regression guard this section exists for. Proves the ACTIVE migration
-  // chain alone — 0000 -> 0001 -> 0003 -> 0004 -> 0005 -> 0006 — can
-  // construct the entire schema from a completely empty database, with
+  // chain alone — 0000 -> 0001 -> 0003 -> 0004 -> 0005 -> 0006 -> 0007 ->
+  // 0008 (Milestone 4 added the last two) — can construct the entire
+  // schema from a completely empty database, with
   // NO reliance on supabase/schema.sql (historical reference only, see
   // CLAUDE.md) and NO execution of the archived one-time production
   // backfill (0002, now under supabase/migrations_archive/, which asserts
@@ -1071,6 +1186,8 @@ async function main() {
     const freshM0004 = readFileSync(join(migrationsDir, '0004_milestone2_activity_routines_schema.sql'), 'utf8');
     const freshM0005 = readFileSync(join(migrationsDir, '0005_milestone2_activity_routines_rls_rpc.sql'), 'utf8');
     const freshM0006 = readFileSync(join(migrationsDir, '0006_exercise_anon_policy_removal.sql'), 'utf8');
+    const freshM0007 = readFileSync(join(migrationsDir, '0007_coach_physician_role_rpcs.sql'), 'utf8');
+    const freshM0008 = readFileSync(join(migrationsDir, '0008_coach_physician_rls_cutover.sql'), 'utf8');
 
     await expectSucceeds(fdb, freshM0000, 'Fresh DB: 0000_baseline_schema.sql applies cleanly against a completely empty database');
     await expectSucceeds(fdb, freshM0001, 'Fresh DB: 0001_milestone1_schema.sql applies cleanly on top of 0000 alone (no schema.sql, no 0002)');
@@ -1078,6 +1195,8 @@ async function main() {
     await expectSucceeds(fdb, freshM0004, 'Fresh DB: 0004_milestone2_activity_routines_schema.sql applies cleanly');
     await expectSucceeds(fdb, freshM0005, 'Fresh DB: 0005_milestone2_activity_routines_rls_rpc.sql applies cleanly');
     await expectSucceeds(fdb, freshM0006, 'Fresh DB: 0006_exercise_anon_policy_removal.sql applies cleanly');
+    await expectSucceeds(fdb, freshM0007, 'Fresh DB: 0007_coach_physician_role_rpcs.sql applies cleanly');
+    await expectSucceeds(fdb, freshM0008, 'Fresh DB: 0008_coach_physician_rls_cutover.sql applies cleanly');
 
     // ── Post-sequence verification: critical baseline tables/types exist ──
     const freshTables = await fdb.query(`
@@ -1112,11 +1231,12 @@ async function main() {
       select proname from pg_proc where pronamespace = 'public'::regnamespace and proname in
         ('set_updated_at','current_org_id','is_super_user','is_org_administrator',
          'log_audit_event','get_athlete_by_code','update_athlete_photo_by_code',
-         'get_athlete_routines','enforce_activity_routine_exercise_org');
+         'get_athlete_routines','enforce_activity_routine_exercise_org',
+         'is_org_coach','is_org_physician');
     `);
     record(
-      'Fresh DB: all 9 expected functions/RPCs exist after the full active sequence',
-      freshFunctions.rows.length === 9,
+      'Fresh DB: all 11 expected functions/RPCs exist after the full active sequence (Milestone 4 adds is_org_coach/is_org_physician)',
+      freshFunctions.rows.length === 11,
       `got: ${freshFunctions.rows.map(r => r.proname).join(', ')}`
     );
 
