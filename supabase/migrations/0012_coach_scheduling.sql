@@ -28,8 +28,9 @@ BEGIN;
 -- 1. COACH_AVAILABILITY (recurring weekly pattern)
 --    Reuses the existing day_of_week enum (0000) — no new enum needed.
 -- ─────────────────────────────────────────────
+-- gen_random_uuid() — see 0010's header comment.
 create table if not exists coach_availability (
-  id               uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id  uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
   coach_id         uuid NOT NULL REFERENCES staff_profiles(id) ON DELETE RESTRICT,
   day_of_week      day_of_week NOT NULL,
@@ -104,8 +105,9 @@ revoke all on coach_availability from anon;
 --    A separate entity from coach_availability by design (see header) —
 --    an absolute date/time range, not a recurring rule.
 -- ─────────────────────────────────────────────
+-- gen_random_uuid() — see 0010's header comment.
 create table if not exists coach_blocks (
-  id               uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id  uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
   coach_id         uuid NOT NULL REFERENCES staff_profiles(id) ON DELETE RESTRICT,
   start_at         timestamptz NOT NULL,

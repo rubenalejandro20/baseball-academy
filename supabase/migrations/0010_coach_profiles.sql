@@ -65,8 +65,18 @@ end $$;
 -- ─────────────────────────────────────────────
 -- 2. COACH_PROFILES TABLE
 -- ─────────────────────────────────────────────
+-- gen_random_uuid(), not uuid_generate_v4(): the latter lives in the
+-- uuid-ossp extension, which Supabase installs into the `extensions`
+-- schema, not `public` — unqualified calls only resolve under sessions
+-- whose search_path happens to include it (true for the SQL Editor, not
+-- guaranteed for every migration-runner connection). gen_random_uuid() is
+-- a pg_catalog builtin on Postgres 13+ (Supabase and PGlite both qualify),
+-- and pg_catalog is implicitly searched regardless of search_path, so this
+-- has no schema-location dependency at all. 0000/0001/0004 keep
+-- uuid_generate_v4() unchanged — those are already applied to production
+-- and must not be edited after the fact.
 create table if not exists coach_profiles (
-  id                  uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id     uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
   coach_id            uuid NOT NULL REFERENCES staff_profiles(id) ON DELETE RESTRICT,
   display_name        text NOT NULL,

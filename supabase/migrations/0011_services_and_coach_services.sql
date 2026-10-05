@@ -36,8 +36,10 @@ BEGIN;
 -- ─────────────────────────────────────────────
 -- 1. SERVICES
 -- ─────────────────────────────────────────────
+-- gen_random_uuid(), not uuid_generate_v4() — see 0010's header comment.
+-- pg_catalog builtin, no extension/schema dependency.
 create table if not exists services (
-  id                        uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id                        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id           uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
   name                      text NOT NULL,
   description               text,
@@ -95,8 +97,9 @@ create policy "Coach reads services"
 -- ─────────────────────────────────────────────
 -- 2. COACH_SERVICES (coach <-> service, with per-pairing overrides)
 -- ─────────────────────────────────────────────
+-- gen_random_uuid() — see 0010's header comment.
 create table if not exists coach_services (
-  id                uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id   uuid NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
   coach_id          uuid NOT NULL REFERENCES staff_profiles(id) ON DELETE RESTRICT,
   service_id        uuid NOT NULL REFERENCES services(id) ON DELETE RESTRICT,
