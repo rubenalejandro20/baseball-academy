@@ -1001,6 +1001,469 @@ async function main() {
 
   await asAdmin(db);
 
+  // ── MILESTONE 5) Booking/scheduling domain foundation: coach_profiles,
+  // services, coach_services, coach_availability, coach_blocks (0009-0012).
+  // Database-only — no bookings/contacts/UI. is_org_physician() must
+  // appear in NONE of these tables' policies; coaches must be isolated
+  // from each other's rows, not just from other organizations.
+  async function staffProfileId(authUserId) {
+    const res = await db.query(`select id from staff_profiles where auth_user_id = '${authUserId}';`);
+    return res.rows[0].id;
+  }
+
+  // Second coach in ORG A (peer-isolation target), a coach in ORG B
+  // (cross-org target), and a THIRD org-A coach who deliberately never
+  // receives a coach_profiles/coach_services/coach_availability/
+  // coach_blocks row from admin setup — reserved as a clean "doesn't
+  // exist yet" target so the various INSERT-denial tests below attempt
+  // an otherwise fully valid row and RLS is the only thing that can
+  // reject it (audit fix: the original versions of several of these
+  // tests targeted a coach/pairing that ALSO already violated a UNIQUE
+  // or composite-FK constraint, so they couldn't prove RLS specifically
+  // was what blocked the attempt).
+  const coachB2Id = 'c0000000-0000-0000-0000-000000000001';
+  const coachOrgBId = 'c0000000-0000-0000-0000-000000000002';
+  const coachB3Id = 'c0000000-0000-0000-0000-000000000003';
+  await db.exec(`insert into auth.users (id, email) values
+    ('${coachB2Id}', 'coachb2@7ar.test'),
+    ('${coachOrgBId}', 'coach@rival.test'),
+    ('${coachB3Id}', 'coachb3@7ar.test');`);
+  await db.exec(`insert into staff_profiles (auth_user_id, organization_id, full_name, email, role, is_active) values
+    ('${coachB2Id}', '${orgA}', 'Coach B2', 'coachb2@7ar.test', 'coach', true),
+    ('${coachOrgBId}', '${orgB}', 'Coach Org B', 'coach@rival.test', 'coach', true),
+    ('${coachB3Id}', '${orgA}', 'Coach B3', 'coachb3@7ar.test', 'coach', true);`);
+
+  const coachStaffId      = await staffProfileId(coachId);
+  const coachB2StaffId    = await staffProfileId(coachB2Id);
+  const coachOrgBStaffId  = await staffProfileId(coachOrgBId);
+  const coachB3StaffId    = await staffProfileId(coachB3Id);
+
+  // ── Apply 0009-0012, each with the standard re-run/idempotency check ──
+  const m0009 = readFileSync(join(migrationsDir, '0009_coach_identity_rpc.sql'), 'utf8');
+  await expectSucceeds(db, m0009, '0009_coach_identity_rpc.sql applies cleanly');
+  await expectSucceeds(db, m0009, '0009_coach_identity_rpc.sql is safely RE-RUNNABLE (applied a second time, no errors)');
+
+  await asUser(db, coachId);
+  const coachSelfId = await db.query(`select current_staff_profile_id() as v;`);
+  record('0009: current_staff_profile_id() resolves to the caller\'s own staff_profiles.id', coachSelfId.rows[0].v === coachStaffId);
+  await asUser(db, dormantId);
+  const dormantSelfId = await db.query(`select current_staff_profile_id() as v;`);
+  record('0009: current_staff_profile_id() resolves to NULL for an unlinked account', dormantSelfId.rows[0].v === null);
+  await asAdmin(db);
+
+  const m0010 = readFileSync(join(migrationsDir, '0010_coach_profiles.sql'), 'utf8');
+  await expectSucceeds(db, m0010, '0010_coach_profiles.sql applies cleanly');
+  await expectSucceeds(db, m0010, '0010_coach_profiles.sql is safely RE-RUNNABLE (applied a second time, no errors)');
+
+  const m0011 = readFileSync(join(migrationsDir, '0011_services_and_coach_services.sql'), 'utf8');
+  await expectSucceeds(db, m0011, '0011_services_and_coach_services.sql applies cleanly');
+  await expectSucceeds(db, m0011, '0011_services_and_coach_services.sql is safely RE-RUNNABLE (applied a second time, no errors)');
+
+  const m0012 = readFileSync(join(migrationsDir, '0012_coach_scheduling.sql'), 'utf8');
+  await expectSucceeds(db, m0012, '0012_coach_scheduling.sql applies cleanly');
+  await expectSucceeds(db, m0012, '0012_coach_scheduling.sql is safely RE-RUNNABLE (applied a second time, no errors)');
+
+  // 0010/0011/0012 now explicitly declare their own table privileges
+  // (GRANT ... TO authenticated; REVOKE ALL ... FROM anon;) — audit fix:
+  // the test harness no longer needs to (and must NOT) replicate a
+  // Supabase default grant to anon for these five tables, unlike the rest
+  // of this file's tables, whose migrations never declare privileges
+  // explicitly. Re-granting anon here would silently UNDO what the
+  // migrations just revoked and make the anonymous-denial tests below
+  // pass for the wrong reason (RLS-filtered rows instead of an actual
+  // permission error).
+
+  // ── coach_profiles: creation/deletion is administrator/Super-User-only ──
+  // Confound-free denial tests FIRST, before admin creates any profile:
+  // coachStaffId has no coach_profiles row yet at this point, so if RLS
+  // were ever accidentally loosened to allow this, it would succeed —
+  // nothing else (no UNIQUE conflict, no FK issue) could mask that.
+  await asUser(db, coachId);
+  await expectThrows(
+    db,
+    `insert into coach_profiles (organization_id, coach_id, display_name) values ('${orgA}', '${coachStaffId}', 'Self Created');`,
+    'coach_profiles: a coach CANNOT insert their own profile, even when no profile exists yet for them (isolates RLS, not UNIQUE(coach_id))',
+    undefined
+  );
+  await asUser(db, physicianId);
+  await expectThrows(
+    db,
+    `insert into coach_profiles (organization_id, coach_id, display_name) values ('${orgA}', '${coachB3StaffId}', 'Physician Created');`,
+    'coach_profiles: a physician CANNOT insert a profile for a coach who has none yet (isolates RLS, not UNIQUE(coach_id))',
+    undefined
+  );
+
+  await asAdmin(db);
+  const coachProfile = await db.query(`
+    insert into coach_profiles (organization_id, coach_id, display_name, bio, is_bookable_online)
+    values ('${orgA}', '${coachStaffId}', 'Coach A', 'Original bio', true) returning id;
+  `);
+  const coachProfileId = coachProfile.rows[0].id;
+  record('coach_profiles: administrator can CREATE a profile for a coach in their org', coachProfile.rows.length === 1);
+
+  const coachB2Profile = await db.query(`
+    insert into coach_profiles (organization_id, coach_id, display_name, is_bookable_online)
+    values ('${orgA}', '${coachB2StaffId}', 'Coach B2', true) returning id;
+  `);
+  const coachB2ProfileId = coachB2Profile.rows[0].id;
+
+  await expectThrows(
+    db,
+    `insert into coach_profiles (organization_id, coach_id, display_name) values ('${orgA}', '${coachOrgBStaffId}', 'Cross Org');`,
+    'coach_profiles: composite FK rejects a coach who belongs to a DIFFERENT organization (admin context, isolates the FK, not RLS)',
+    undefined
+  );
+
+  await asUser(db, coachId);
+  await expectRows(db, `select * from coach_profiles where id = '${coachProfileId}';`, 1, 'coach_profiles: a coach can SELECT their own existing profile');
+  await db.exec(`update coach_profiles set display_name = 'Coach A Updated', bio = 'New bio', is_bookable_online = false where id = '${coachProfileId}';`);
+  await asAdmin(db);
+  const coachProfileAfterSelfUpdateAdmin = await db.query(`select display_name, bio, is_bookable_online from coach_profiles where id = '${coachProfileId}';`);
+  record(
+    'coach_profiles: a coach CAN update display_name/bio/is_bookable_online on their own existing profile',
+    coachProfileAfterSelfUpdateAdmin.rows[0].display_name === 'Coach A Updated' &&
+    coachProfileAfterSelfUpdateAdmin.rows[0].bio === 'New bio' &&
+    coachProfileAfterSelfUpdateAdmin.rows[0].is_bookable_online === false
+  );
+
+  await asUser(db, coachId);
+  await db.exec(`delete from coach_profiles where id = '${coachProfileId}';`); // RLS-filtered: no DELETE policy for coach, so 0 rows match — not an error
+  await asAdmin(db);
+  const coachProfileAfterSelfDeleteAttempt = await db.query(`select * from coach_profiles where id = '${coachProfileId}';`);
+  record(
+    'coach_profiles: a coach\'s DELETE on their own profile affects zero rows (no DELETE policy, RLS-filtered, not an error)',
+    coachProfileAfterSelfDeleteAttempt.rows.length === 1
+  );
+
+  await asUser(db, coachId);
+  await expectRows(db, `select * from coach_profiles where id = '${coachB2ProfileId}';`, 0, 'coach_profiles: a coach cannot SELECT a peer coach\'s profile (same org)');
+  await db.exec(`update coach_profiles set display_name = 'Hijacked' where id = '${coachB2ProfileId}';`); // RLS-filtered, 0 rows
+  await asAdmin(db);
+  const coachB2AfterPeerAttempt = await db.query(`select display_name from coach_profiles where id = '${coachB2ProfileId}';`);
+  record('coach_profiles: a coach\'s UPDATE attempt on a peer coach\'s profile affects zero rows', coachB2AfterPeerAttempt.rows[0].display_name === 'Coach B2');
+
+  await expectThrows(
+    db,
+    `update coach_profiles set coach_id = '${coachB2StaffId}' where id = '${coachProfileId}';`,
+    'coach_profiles: coach_id is immutable after insert, even for an administrator',
+    'coach_id cannot be changed'
+  );
+  await expectThrows(
+    db,
+    `update coach_profiles set organization_id = '${orgB}' where id = '${coachProfileId}';`,
+    'coach_profiles: organization_id is immutable after insert, even for an administrator',
+    'organization_id cannot be changed'
+  );
+  await expectThrows(
+    db,
+    `insert into coach_profiles (organization_id, coach_id, display_name) values ('${orgA}', '${coachStaffId}', 'Dup');`,
+    'coach_profiles: UNIQUE(coach_id) rejects a second profile for the same coach',
+    'duplicate key'
+  );
+
+  await asUser(db, physicianId);
+  await expectRows(db, `select * from coach_profiles;`, 0, 'coach_profiles: physician has ZERO access (physician INSERT denial already proven above, confound-free)');
+  await asUser(db, orgBAdminId);
+  await expectRows(db, `select * from coach_profiles where id in ('${coachProfileId}', '${coachB2ProfileId}');`, 0, 'coach_profiles: cross-org administrator (org B) cannot see org A\'s profiles');
+  await asUser(db, ownerId);
+  await expectRows(db, `select * from coach_profiles;`, 2, 'coach_profiles: Super User sees across organizations (both org A profiles so far)');
+  await asAnon(db);
+  await expectThrows(
+    db,
+    `select * from coach_profiles;`,
+    'coach_profiles: anonymous access fully denied — no table grant at all for anon, not just an RLS-filtered empty result',
+    'permission denied'
+  );
+  await asAdmin(db);
+
+  // ── services: admin CRUD, coach read-only, case-insensitive per-org
+  //    name uniqueness, physician denial, cross-org denial ──────────────
+  const svcPitching = await db.query(`
+    insert into services (organization_id, name, default_duration_minutes, default_price_cents)
+    values ('${orgA}', 'Pitching Lesson', 60, 8000) returning id;
+  `);
+  const svcPitchingId = svcPitching.rows[0].id;
+
+  await expectThrows(
+    db,
+    `insert into services (organization_id, name, default_duration_minutes) values ('${orgA}', 'pitching lesson', 30);`,
+    'services: case-insensitive duplicate name in the SAME organization is rejected',
+    'duplicate key'
+  );
+  const svcPitchingOrgB = await db.query(`
+    insert into services (organization_id, name, default_duration_minutes)
+    values ('${orgB}', 'Pitching Lesson', 45) returning id;
+  `);
+  record('services: the SAME name is allowed in a DIFFERENT organization', svcPitchingOrgB.rows.length === 1);
+
+  await expectThrows(db, `insert into services (organization_id, name, default_duration_minutes) values ('${orgA}', 'Bad Duration', 0);`, 'services: default_duration_minutes must be > 0', undefined);
+  await expectThrows(db, `insert into services (organization_id, name, default_duration_minutes, default_price_cents) values ('${orgA}', 'Bad Price', 30, -100);`, 'services: default_price_cents cannot be negative', undefined);
+
+  await asUser(db, coachId);
+  await expectRows(db, `select * from services where organization_id = '${orgA}';`, 1, 'services: coach can READ the org catalog');
+  await expectThrows(db, `insert into services (organization_id, name, default_duration_minutes) values ('${orgA}', 'Coach Added', 30);`, 'services: coach cannot INSERT', undefined);
+  await db.exec(`update services set name = 'Hijacked' where id = '${svcPitchingId}';`); // RLS-filtered
+  await asAdmin(db);
+  const svcAfterCoachAttempt = await db.query(`select name from services where id = '${svcPitchingId}';`);
+  record('services: coach\'s UPDATE attempt affects zero rows', svcAfterCoachAttempt.rows[0].name === 'Pitching Lesson');
+
+  await asUser(db, physicianId);
+  await expectRows(db, `select * from services;`, 0, 'services: physician has ZERO access');
+  await expectThrows(
+    db,
+    `insert into services (organization_id, name, default_duration_minutes) values ('${orgA}', 'Physician Added Service', 30);`,
+    'services: physician cannot INSERT an otherwise fully valid, non-conflicting service (isolates RLS, not any other constraint)',
+    undefined
+  );
+  await asUser(db, orgBAdminId);
+  await expectRows(db, `select * from services where id = '${svcPitchingId}';`, 0, 'services: cross-org administrator cannot see org A\'s service');
+  await asUser(db, ownerId);
+  await expectRows(db, `select * from services;`, 2, 'services: Super User sees across organizations');
+  await asAnon(db);
+  await expectThrows(
+    db,
+    `select * from services;`,
+    'services: anonymous access fully denied — no table grant at all for anon',
+    'permission denied'
+  );
+  await asAdmin(db);
+
+  // ── coach_services: admin CRUD, coach read-only-own, composite FK
+  //    integrity, identity immutability, RPC-only self-toggle ───────────
+  // Confound-free denial test FIRST, before admin creates this exact
+  // pairing: an otherwise fully valid, non-conflicting (coach, service)
+  // row, attempted by the coach themselves — nothing but RLS could reject
+  // this (no UNIQUE conflict, no composite-FK issue, correct org on both
+  // sides).
+  await asUser(db, coachId);
+  await expectThrows(
+    db,
+    `insert into coach_services (organization_id, coach_id, service_id) values ('${orgA}', '${coachStaffId}', '${svcPitchingId}');`,
+    'coach_services: a coach CANNOT insert their own otherwise fully valid assignment (isolates RLS, not UNIQUE or the composite FK)',
+    undefined
+  );
+  await asAdmin(db);
+
+  const coachService = await db.query(`
+    insert into coach_services (organization_id, coach_id, service_id, price_cents, duration_minutes)
+    values ('${orgA}', '${coachStaffId}', '${svcPitchingId}', 7500, 60) returning id;
+  `);
+  const coachServiceId = coachService.rows[0].id;
+  const coachB2Service = await db.query(`
+    insert into coach_services (organization_id, coach_id, service_id)
+    values ('${orgA}', '${coachB2StaffId}', '${svcPitchingId}') returning id;
+  `);
+  const coachB2ServiceId = coachB2Service.rows[0].id;
+
+  await expectThrows(
+    db,
+    `insert into coach_services (organization_id, coach_id, service_id) values ('${orgA}', '${coachStaffId}', '${svcPitchingId}');`,
+    'coach_services: UNIQUE(coach_id, service_id) rejects a duplicate pairing',
+    'duplicate key'
+  );
+  await expectThrows(
+    db,
+    `insert into coach_services (organization_id, coach_id, service_id) values ('${orgA}', '${coachOrgBStaffId}', '${svcPitchingId}');`,
+    'coach_services: composite FK rejects a pairing where the coach belongs to a DIFFERENT organization than organization_id',
+    undefined
+  );
+  await expectThrows(
+    db,
+    `insert into coach_services (organization_id, coach_id, service_id) values ('${orgA}', '${coachStaffId}', '${svcPitchingOrgB.rows[0].id}');`,
+    'coach_services: composite FK rejects a pairing where the SERVICE belongs to a DIFFERENT organization than organization_id',
+    undefined
+  );
+  await expectThrows(db, `update coach_services set price_cents = -1 where id = '${coachServiceId}';`, 'coach_services: price_cents cannot be negative', undefined);
+  await expectThrows(db, `update coach_services set duration_minutes = 0 where id = '${coachServiceId}';`, 'coach_services: duration_minutes must be > 0', undefined);
+
+  await expectThrows(
+    db,
+    `update coach_services set coach_id = '${coachB2StaffId}' where id = '${coachServiceId}';`,
+    'coach_services: coach_id is immutable after insert, even for an administrator',
+    'coach_id cannot be changed'
+  );
+  await expectThrows(
+    db,
+    `update coach_services set service_id = '${svcPitchingOrgB.rows[0].id}' where id = '${coachServiceId}';`,
+    'coach_services: service_id is immutable after insert, even for an administrator',
+    'service_id cannot be changed'
+  );
+  await expectThrows(
+    db,
+    `update coach_services set organization_id = '${orgB}' where id = '${coachServiceId}';`,
+    'coach_services: organization_id is immutable after insert, even for an administrator',
+    'organization_id cannot be changed'
+  );
+
+  await asUser(db, coachId);
+  await expectRows(db, `select * from coach_services;`, 1, 'coach_services: a coach sees exactly their OWN offering, not a peer\'s (INSERT denial already proven above, confound-free)');
+  await db.exec(`update coach_services set is_active = false where id = '${coachServiceId}';`); // RLS-filtered: coach has NO write policy at all
+  await db.exec(`delete from coach_services where id = '${coachServiceId}';`); // RLS-filtered
+  await asAdmin(db);
+  const coachServiceAfterRawAttempts = await db.query(`select is_active from coach_services where id = '${coachServiceId}';`);
+  record(
+    'coach_services: a coach\'s raw UPDATE/DELETE on their own row both affect zero rows (no write policy at all for coach)',
+    coachServiceAfterRawAttempts.rows.length === 1 && coachServiceAfterRawAttempts.rows[0].is_active === true
+  );
+
+  // The only sanctioned coach write path: the RPC.
+  await asUser(db, coachId);
+  const toggleOwn = await db.query(`select set_coach_service_bookable('${coachServiceId}', false) as v;`);
+  record('set_coach_service_bookable: coach toggling their OWN offering succeeds', toggleOwn.rows[0].v === true);
+  const toggleOther = await db.query(`select set_coach_service_bookable('${coachB2ServiceId}', false) as v;`);
+  record('set_coach_service_bookable: coach toggling ANOTHER coach\'s offering returns false (no-op)', toggleOther.rows[0].v === false);
+  await asAdmin(db);
+  const afterToggle = await db.query(`select is_active, price_cents, duration_minutes, coach_id, service_id, organization_id from coach_services where id = '${coachServiceId}';`);
+  record(
+    'set_coach_service_bookable: ONLY is_active changed — price_cents/duration_minutes/coach_id/service_id/organization_id all untouched',
+    afterToggle.rows[0].is_active === false &&
+    afterToggle.rows[0].price_cents === 7500 &&
+    afterToggle.rows[0].duration_minutes === 60 &&
+    afterToggle.rows[0].coach_id === coachStaffId &&
+    afterToggle.rows[0].service_id === svcPitchingId &&
+    afterToggle.rows[0].organization_id === orgA
+  );
+  const coachB2ServiceUnchanged = await db.query(`select is_active from coach_services where id = '${coachB2ServiceId}';`);
+  record('set_coach_service_bookable: the no-op call left the OTHER coach\'s row completely unchanged', coachB2ServiceUnchanged.rows[0].is_active === true);
+  const toggleNonexistent = await db.query(`select set_coach_service_bookable('00000000-0000-0000-0000-000000000000', true) as v;`);
+  record('set_coach_service_bookable: a nonexistent id returns false, same shape as "not yours" (no info leak)', toggleNonexistent.rows[0].v === false);
+
+  await asUser(db, physicianId);
+  await expectRows(db, `select * from coach_services;`, 0, 'coach_services: physician has ZERO access');
+  await expectThrows(
+    db,
+    `insert into coach_services (organization_id, coach_id, service_id) values ('${orgA}', '${coachB3StaffId}', '${svcPitchingId}');`,
+    'coach_services: physician cannot INSERT an otherwise fully valid, non-conflicting pairing (isolates RLS)',
+    undefined
+  );
+  await asUser(db, orgBAdminId);
+  await expectRows(db, `select * from coach_services where id in ('${coachServiceId}', '${coachB2ServiceId}');`, 0, 'coach_services: cross-org administrator cannot see org A\'s offerings');
+  await asUser(db, ownerId);
+  await expectRows(db, `select * from coach_services;`, 2, 'coach_services: Super User sees across organizations');
+  await asAnon(db);
+  await expectThrows(
+    db,
+    `select * from coach_services;`,
+    'coach_services: anonymous access fully denied — no table grant at all for anon',
+    'permission denied'
+  );
+  await asAdmin(db);
+
+  // ── coach_availability / coach_blocks: coach full CRUD own rows, peer
+  //    isolation, admin full CRUD any coach in org, identity immutability ─
+  const avail = await db.query(`
+    insert into coach_availability (organization_id, coach_id, day_of_week, start_time, end_time)
+    values ('${orgA}', '${coachStaffId}', 'monday', '09:00', '12:00') returning id;
+  `);
+  const availId = avail.rows[0].id;
+  const availB2 = await db.query(`
+    insert into coach_availability (organization_id, coach_id, day_of_week, start_time, end_time)
+    values ('${orgA}', '${coachB2StaffId}', 'tuesday', '09:00', '12:00') returning id;
+  `);
+  const availB2Id = availB2.rows[0].id;
+
+  await expectThrows(db, `insert into coach_availability (organization_id, coach_id, day_of_week, start_time, end_time) values ('${orgA}', '${coachStaffId}', 'wednesday', '12:00', '09:00');`, 'coach_availability: end_time must be after start_time', undefined);
+  await expectThrows(
+    db,
+    `insert into coach_availability (organization_id, coach_id, day_of_week, start_time, end_time) values ('${orgA}', '${coachOrgBStaffId}', 'monday', '09:00', '10:00');`,
+    'coach_availability: composite FK rejects a coach from a DIFFERENT organization',
+    undefined
+  );
+
+  await asUser(db, coachId);
+  await expectRows(db, `select * from coach_availability;`, 1, 'coach_availability: a coach sees exactly their OWN window, not a peer\'s');
+  const ownAvailUpdate = await db.query(`update coach_availability set is_active = false where id = '${availId}' returning is_active;`);
+  record('coach_availability: a coach CAN update their own row', ownAvailUpdate.rows[0]?.is_active === false);
+  await db.exec(`update coach_availability set is_active = false where id = '${availB2Id}';`); // RLS-filtered
+  await db.exec(`delete from coach_availability where id = '${availB2Id}';`); // RLS-filtered
+  await asAdmin(db);
+  const availB2AfterPeerAttempt = await db.query(`select is_active from coach_availability where id = '${availB2Id}';`);
+  record('coach_availability: a peer coach\'s UPDATE/DELETE attempts both affect zero rows', availB2AfterPeerAttempt.rows.length === 1 && availB2AfterPeerAttempt.rows[0].is_active === true);
+
+  await expectThrows(db, `update coach_availability set coach_id = '${coachB2StaffId}' where id = '${availId}';`, 'coach_availability: coach_id is immutable after insert', 'coach_id cannot be changed');
+  await expectThrows(db, `update coach_availability set organization_id = '${orgB}' where id = '${availId}';`, 'coach_availability: organization_id is immutable after insert', 'organization_id cannot be changed');
+
+  const block = await db.query(`
+    insert into coach_blocks (organization_id, coach_id, start_at, end_at, reason)
+    values ('${orgA}', '${coachStaffId}', '2026-02-01T00:00:00Z', '2026-02-07T00:00:00Z', 'Vacation') returning id;
+  `);
+  const blockId = block.rows[0].id;
+  await expectThrows(db, `insert into coach_blocks (organization_id, coach_id, start_at, end_at) values ('${orgA}', '${coachStaffId}', '2026-02-07T00:00:00Z', '2026-02-01T00:00:00Z');`, 'coach_blocks: end_at must be after start_at', undefined);
+  await expectThrows(
+    db,
+    `insert into coach_blocks (organization_id, coach_id, start_at, end_at) values ('${orgA}', '${coachOrgBStaffId}', '2026-03-01T00:00:00Z', '2026-03-02T00:00:00Z');`,
+    'coach_blocks: composite FK rejects a coach from a DIFFERENT organization (admin context, isolates the FK, not RLS)',
+    undefined
+  );
+  await expectThrows(db, `update coach_blocks set coach_id = '${coachB2StaffId}' where id = '${blockId}';`, 'coach_blocks: coach_id is immutable after insert', 'coach_id cannot be changed');
+  await expectThrows(db, `update coach_blocks set organization_id = '${orgB}' where id = '${blockId}';`, 'coach_blocks: organization_id is immutable after insert', 'organization_id cannot be changed');
+
+  await asUser(db, coachId);
+  await expectRows(db, `select * from coach_blocks;`, 1, 'coach_blocks: a coach sees exactly their OWN block');
+  await asAdmin(db);
+
+  // Physician write-denial, one otherwise fully valid row per table
+  // (coachB3StaffId has no rows in either table, fresh day/date range) —
+  // isolates RLS, not any other constraint.
+  await asUser(db, physicianId);
+  await expectThrows(
+    db,
+    `insert into coach_availability (organization_id, coach_id, day_of_week, start_time, end_time) values ('${orgA}', '${coachB3StaffId}', 'thursday', '09:00', '10:00');`,
+    'coach_availability: physician cannot INSERT an otherwise fully valid, non-conflicting row (isolates RLS)',
+    undefined
+  );
+  await expectThrows(
+    db,
+    `insert into coach_blocks (organization_id, coach_id, start_at, end_at) values ('${orgA}', '${coachB3StaffId}', '2026-04-01T00:00:00Z', '2026-04-02T00:00:00Z');`,
+    'coach_blocks: physician cannot INSERT an otherwise fully valid, non-conflicting row (isolates RLS)',
+    undefined
+  );
+  await asAdmin(db);
+
+  for (const table of ['coach_availability', 'coach_blocks']) {
+    await asUser(db, physicianId);
+    await expectRows(db, `select * from ${table};`, 0, `${table}: physician has ZERO access`);
+    await asUser(db, orgBAdminId);
+    await expectRows(db, `select * from ${table} where organization_id = '${orgA}';`, 0, `${table}: cross-org administrator cannot see org A's rows`);
+    await asAnon(db);
+    await expectThrows(
+      db,
+      `select * from ${table};`,
+      `${table}: anonymous access fully denied — no table grant at all for anon`,
+      'permission denied'
+    );
+    await asAdmin(db);
+  }
+  await asUser(db, ownerId);
+  await expectRows(db, `select * from coach_availability;`, 2, 'coach_availability: Super User sees across organizations');
+  await expectRows(db, `select * from coach_blocks;`, 1, 'coach_blocks: Super User sees across organizations');
+  await asAdmin(db);
+
+  // ── Administrator full CRUD within own org, across all five tables ───
+  await asUser(db, plainAdminId);
+  await expectRows(db, `select * from coach_profiles;`, 2, 'Administrator: full read access to coach_profiles within own org');
+  await expectRows(db, `select * from services where organization_id = '${orgA}';`, 1, 'Administrator: full read access to services within own org');
+  await expectRows(db, `select * from coach_services;`, 2, 'Administrator: full read access to coach_services within own org');
+  await expectRows(db, `select * from coach_availability;`, 2, 'Administrator: full read access to coach_availability within own org');
+  await expectRows(db, `select * from coach_blocks;`, 1, 'Administrator: full read access to coach_blocks within own org');
+  await asAdmin(db);
+
+  // ── Deletion semantics: RESTRICT, not CASCADE, for business-domain FKs ─
+  await expectThrows(
+    db,
+    `delete from services where id = '${svcPitchingId}';`,
+    'Deletion semantics: deleting a service that still has a coach_services row pointing at it is RESTRICTed, not cascaded',
+    undefined
+  );
+  await expectThrows(
+    db,
+    `delete from staff_profiles where id = '${coachStaffId}';`,
+    'Deletion semantics: deleting a staff_profiles row that still has coach_profiles/coach_services/coach_availability/coach_blocks rows is RESTRICTed, not cascaded',
+    undefined
+  );
+
+  await asAdmin(db);
+
   await db.close();
 
   // ── 18) Emergency rollback for 0001 — fresh, isolated instance ──────────
@@ -1150,8 +1613,9 @@ async function main() {
   // ── 22) TRUE FRESH-DATABASE MIGRATION SEQUENCE — the release-blocker
   // regression guard this section exists for. Proves the ACTIVE migration
   // chain alone — 0000 -> 0001 -> 0003 -> 0004 -> 0005 -> 0006 -> 0007 ->
-  // 0008 (Milestone 4 added the last two) — can construct the entire
-  // schema from a completely empty database, with
+  // 0008 -> 0009 -> 0010 -> 0011 -> 0012 (Milestone 5 added the last
+  // four: the booking/scheduling domain foundation) — can construct the
+  // entire schema from a completely empty database, with
   // NO reliance on supabase/schema.sql (historical reference only, see
   // CLAUDE.md) and NO execution of the archived one-time production
   // backfill (0002, now under supabase/migrations_archive/, which asserts
@@ -1188,6 +1652,10 @@ async function main() {
     const freshM0006 = readFileSync(join(migrationsDir, '0006_exercise_anon_policy_removal.sql'), 'utf8');
     const freshM0007 = readFileSync(join(migrationsDir, '0007_coach_physician_role_rpcs.sql'), 'utf8');
     const freshM0008 = readFileSync(join(migrationsDir, '0008_coach_physician_rls_cutover.sql'), 'utf8');
+    const freshM0009 = readFileSync(join(migrationsDir, '0009_coach_identity_rpc.sql'), 'utf8');
+    const freshM0010 = readFileSync(join(migrationsDir, '0010_coach_profiles.sql'), 'utf8');
+    const freshM0011 = readFileSync(join(migrationsDir, '0011_services_and_coach_services.sql'), 'utf8');
+    const freshM0012 = readFileSync(join(migrationsDir, '0012_coach_scheduling.sql'), 'utf8');
 
     await expectSucceeds(fdb, freshM0000, 'Fresh DB: 0000_baseline_schema.sql applies cleanly against a completely empty database');
     await expectSucceeds(fdb, freshM0001, 'Fresh DB: 0001_milestone1_schema.sql applies cleanly on top of 0000 alone (no schema.sql, no 0002)');
@@ -1197,6 +1665,10 @@ async function main() {
     await expectSucceeds(fdb, freshM0006, 'Fresh DB: 0006_exercise_anon_policy_removal.sql applies cleanly');
     await expectSucceeds(fdb, freshM0007, 'Fresh DB: 0007_coach_physician_role_rpcs.sql applies cleanly');
     await expectSucceeds(fdb, freshM0008, 'Fresh DB: 0008_coach_physician_rls_cutover.sql applies cleanly');
+    await expectSucceeds(fdb, freshM0009, 'Fresh DB: 0009_coach_identity_rpc.sql applies cleanly');
+    await expectSucceeds(fdb, freshM0010, 'Fresh DB: 0010_coach_profiles.sql applies cleanly');
+    await expectSucceeds(fdb, freshM0011, 'Fresh DB: 0011_services_and_coach_services.sql applies cleanly');
+    await expectSucceeds(fdb, freshM0012, 'Fresh DB: 0012_coach_scheduling.sql applies cleanly');
 
     // ── Post-sequence verification: critical baseline tables/types exist ──
     const freshTables = await fdb.query(`
@@ -1204,15 +1676,17 @@ async function main() {
       where table_schema = 'public' and table_name in
         ('athletes','exercises','weekly_plans','assigned_exercises',
          'organizations','staff_profiles','platform_admins','audit_events',
-         'athlete_access_attempts','activity_routines');
+         'athlete_access_attempts','activity_routines',
+         'coach_profiles','services','coach_services','coach_availability','coach_blocks');
     `);
     const expectedFreshTables = [
       'athletes','exercises','weekly_plans','assigned_exercises',
       'organizations','staff_profiles','platform_admins','audit_events',
       'athlete_access_attempts','activity_routines',
+      'coach_profiles','services','coach_services','coach_availability','coach_blocks',
     ].sort();
     record(
-      'Fresh DB: all 10 expected tables exist after the full active sequence',
+      'Fresh DB: all 15 expected tables exist after the full active sequence (Milestone 5 adds the booking/scheduling domain foundation)',
       JSON.stringify(freshTables.rows.map(r => r.table_name).sort()) === JSON.stringify(expectedFreshTables),
       `got: ${freshTables.rows.map(r => r.table_name).sort().join(', ')}`
     );
@@ -1222,7 +1696,7 @@ async function main() {
         ('exercise_category','day_of_week','staff_role','activity_type');
     `);
     record(
-      'Fresh DB: all 4 expected enum types exist after the full active sequence',
+      'Fresh DB: all 4 expected enum types exist after the full active sequence (Milestone 5 adds no new enum — coach_availability reuses day_of_week)',
       freshTypes.rows.length === 4,
       `got: ${freshTypes.rows.map(r => r.typname).join(', ')}`
     );
@@ -1232,20 +1706,29 @@ async function main() {
         ('set_updated_at','current_org_id','is_super_user','is_org_administrator',
          'log_audit_event','get_athlete_by_code','update_athlete_photo_by_code',
          'get_athlete_routines','enforce_activity_routine_exercise_org',
-         'is_org_coach','is_org_physician');
+         'is_org_coach','is_org_physician',
+         'current_staff_profile_id','set_coach_service_bookable');
     `);
     record(
-      'Fresh DB: all 11 expected functions/RPCs exist after the full active sequence (Milestone 4 adds is_org_coach/is_org_physician)',
-      freshFunctions.rows.length === 11,
+      'Fresh DB: all 13 expected functions/RPCs exist after the full active sequence (Milestone 5 adds current_staff_profile_id/set_coach_service_bookable)',
+      freshFunctions.rows.length === 13,
       `got: ${freshFunctions.rows.map(r => r.proname).join(', ')}`
     );
 
     const freshRlsCheck = await fdb.query(`
       select relname from pg_class
-      where relname in ('athletes','exercises','weekly_plans','assigned_exercises','activity_routines')
-        and relrowsecurity = true;
+      where relname in (
+        'athletes','exercises','weekly_plans','assigned_exercises','activity_routines',
+        'coach_profiles','services','coach_services','coach_availability','coach_blocks'
+      ) and relrowsecurity = true;
     `);
-    record('Fresh DB: RLS is enabled on all 5 user-data tables', freshRlsCheck.rows.length === 5);
+    record('Fresh DB: RLS is enabled on all 10 user-data tables (5 physician/trainer-domain + 5 Milestone 5 booking-domain)', freshRlsCheck.rows.length === 10);
+
+    const freshCompositeFkCheck = await fdb.query(`
+      select conname from pg_constraint
+      where conname in ('staff_profiles_org_id_unique','services_org_id_unique');
+    `);
+    record('Fresh DB: the two composite organization-integrity UNIQUE constraints exist (staff_profiles, services)', freshCompositeFkCheck.rows.length === 2);
 
     await fdb.close();
   }
