@@ -256,3 +256,101 @@ export interface AthleteLookupResult {
   position: string | null;
   photo_url: string | null;
 }
+
+// ─────────────────────────────────────────────
+// Milestone 5: Coach/Booking Domain Foundation
+// ─────────────────────────────────────────────
+
+// Booking-facing coach configuration — deliberately separate from
+// StaffProfile (identity). Not auto-created; may not exist yet for a
+// given coach (see coach/page.tsx's handling of a missing row).
+export interface CoachProfile {
+  id: string;
+  organization_id: string;
+  coach_id: string;
+  display_name: string;
+  bio: string | null;
+  is_bookable_online: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Service {
+  id: string;
+  organization_id: string;
+  name: string;
+  description: string | null;
+  default_duration_minutes: number;
+  default_price_cents: number | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// coach_services.duration_minutes/price_cents NULL = inherit the
+// corresponding services.default_* value. See formatCents() below and
+// coach/services/page.tsx for the effective-value calculation.
+export interface CoachService {
+  id: string;
+  organization_id: string;
+  coach_id: string;
+  service_id: string;
+  price_cents: number | null;
+  duration_minutes: number | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  // Joined via .select('*, service:services(*)')
+  service?: Service;
+}
+
+// Recurring weekly availability. A coach may have zero, one, or multiple
+// rows per day_of_week (no UNIQUE(coach_id, day_of_week) constraint —
+// split shifts are valid data).
+export interface CoachAvailability {
+  id: string;
+  organization_id: string;
+  coach_id: string;
+  day_of_week: DayOfWeek;
+  start_time: string; // Postgres `time`, returned as "HH:MM:SS"
+  end_time: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// One-off blocked time / time off. Real start_at/end_at timestamps —
+// there is no "all day" concept in the schema; a whole-day block is just
+// a block with wide start/end times.
+export interface CoachBlock {
+  id: string;
+  organization_id: string;
+  coach_id: string;
+  start_at: string; // timestamptz, ISO 8601
+  end_at: string;
+  reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ─────────────────────────────────────────────
+// Money / time formatting (Milestone 5 domain)
+// ─────────────────────────────────────────────
+
+const USD_FORMATTER = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
+
+// Integer cents -> "$75.00". Callers decide how to label a null price
+// (e.g. "Price not set") — this function only formats a real amount.
+export function formatCents(cents: number): string {
+  return USD_FORMATTER.format(cents / 100);
+}
+
+// Postgres `time` string ("09:00:00" or "09:00") -> "9:00 AM".
+export function formatTime12h(time: string): string {
+  const [hStr, mStr] = time.split(':');
+  const h = parseInt(hStr, 10);
+  const m = parseInt(mStr, 10);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}:${String(m).padStart(2, '0')} ${period}`;
+}

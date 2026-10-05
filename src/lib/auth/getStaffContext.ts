@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase';
 import { type StaffRole } from '@/lib/types';
 
 export type StaffContextResult =
-  | { status: 'ok'; organizationId: string; role: StaffRole | null; email: string; isSuperUser: boolean }
+  | { status: 'ok'; organizationId: string; staffProfileId: string | null; role: StaffRole | null; email: string; isSuperUser: boolean }
   | { status: 'no_session' }
   | { status: 'not_linked' };
 
@@ -38,6 +38,20 @@ export type StaffContextResult =
  * below is therefore resolved administrator-first, matching how RLS
  * policies compose these same booleans with OR in 0008
  * (`is_org_administrator() OR is_org_physician()`).
+ *
+ * staffProfileId (Milestone 6) resolves the caller's OWN staff_profiles.id
+ * via current_staff_profile_id() (0009) — the first field this function
+ * exposes that answers "which row is the caller," not just "what is true
+ * about them." Coach Portal pages need this for two reasons: to construct
+ * valid coach_availability/coach_blocks INSERTs (coach_id/organization_id
+ * have no default and must be supplied by the client), and to explicitly
+ * scope "my data" queries so an administrator or Super User browsing the
+ * Coach Portal — both allowed in by Milestone 4's guard — see their own
+ * (typically empty) scope rather than every coach's rows via their
+ * broader RLS policy. Included in the same fail-closed check as every
+ * other RPC here, for the same reason: a transient error on this call
+ * must not silently resolve to null and let a write proceed with a
+ * missing/undefined coach_id.
  */
 export async function getStaffContext(): Promise<StaffContextResult> {
   const supabase = createClient();
@@ -45,12 +59,13 @@ export async function getStaffContext(): Promise<StaffContextResult> {
 
   if (!session) return { status: 'no_session' };
 
-  const [orgResult, adminResult, coachResult, physicianResult, superUserResult] = await Promise.all([
+  const [orgResult, adminResult, coachResult, physicianResult, superUserResult, staffProfileIdResult] = await Promise.all([
     supabase.rpc('current_org_id'),
     supabase.rpc('is_org_administrator'),
     supabase.rpc('is_org_coach'),
     supabase.rpc('is_org_physician'),
     supabase.rpc('is_super_user'),
+    supabase.rpc('current_staff_profile_id'),
   ]);
 
   // Fail closed on ANY of these erroring, not just orgResult. A silent
@@ -67,12 +82,14 @@ export async function getStaffContext(): Promise<StaffContextResult> {
   // over-privileged context.
   if (
     orgResult.error || !orgResult.data ||
-    adminResult.error || coachResult.error || physicianResult.error || superUserResult.error
+    adminResult.error || coachResult.error || physicianResult.error || superUserResult.error ||
+    staffProfileIdResult.error
   ) return { status: 'not_linked' };
 
   return {
     status: 'ok',
     organizationId: orgResult.data as string,
+    staffProfileId: (staffProfileIdResult.data as string | null) ?? null,
     role: adminResult.data
       ? 'administrator'
       : coachResult.data

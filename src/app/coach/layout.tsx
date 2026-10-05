@@ -6,10 +6,12 @@ import { createClient } from '@/lib/supabase';
 import { getStaffContext, type StaffContextResult } from '@/lib/auth/getStaffContext';
 import { AppShell, type NavItem } from '@/components/shell/AppShell';
 import { CheckingScreen, NotLinkedScreen, ForbiddenScreen } from '@/components/shell/StaffGuardScreens';
-import { LayoutDashboard } from 'lucide-react';
+import { LayoutDashboard, Dumbbell, CalendarClock } from 'lucide-react';
 
 const NAV: NavItem[] = [
   { href: '/coach', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/coach/services', label: 'My Services', icon: Dumbbell },
+  { href: '/coach/availability', label: 'Availability', icon: CalendarClock },
 ];
 
 type GuardState = 'checking' | 'authorized' | 'not_linked' | 'forbidden';
